@@ -1,0 +1,50 @@
+.card {
+    font-family: alexandria;
+    font-weight: 300;
+    font-size: 20px;
+    text-align: center;
+    color: black;
+    background-color: white;
+}
+.cloze {
+    font-weight: 500;
+    color: #2f63bd;
+}
+.nightMode .cloze {
+    color: #78a4f0;
+}
+.back {
+    color: #0c9932;
+}
+.nightMode .back {
+    color: #7ee6b9;
+}
+.hints {
+  font-size: 1.25rem;
+  font-weight: 200;
+}
+.mobile .hints {
+  font-size: 1.1rem;
+  font-weight: 300;
+}
+
+.button-general {
+  border-radius: 0.12em;
+  border: 1px solid #525253;
+  padding: 13px 0px 0px 0px;
+  font-size: 9.5px;
+  background-color: #d9993b;
+  color: #1c1b1a;
+  max-width: 200px;
+}
+
+.nightMode .button-general {
+  background-color: #323236;
+  color: #ceced6;
+}
+
+.mobile .button-general {
+  border-radius: 1em;
+  font-size: 15px;
+  padding: 17px 0px 0px 0px;
+}
