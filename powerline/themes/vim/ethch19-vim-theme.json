@@ -1,0 +1,58 @@
+{
+	"name": "ethch19-vim-theme",
+	"segments": {
+		"left": [
+			{
+				"function": "mode",
+				"exclude_modes": ["nc"]
+			},
+			{
+				"function": "visual_range",
+				"include_modes": ["v", "V", "^V", "s", "S", "^S"],
+				"priority": 10
+			},
+			{
+				"function": "branch",
+				"exclude_modes": ["nc"],
+				"priority": 30
+			},
+			{
+				"function": "file_scheme",
+				"priority": 20
+			},
+			{
+				"function": "file_directory",
+				"priority": 40,
+				"draw_soft_divider": false
+			},
+			{
+				"function": "file_name",
+				"draw_soft_divider": false
+			},
+			{
+				"function": "powerline.segments.vim.plugin.ale.ale",
+				"priority": 50
+			},
+			{
+				"type": "string",
+				"highlight_groups": ["background"],
+				"draw_soft_divider": false,
+				"draw_hard_divider": false,
+				"width": "auto"
+			}
+		],
+		"right": [
+			{
+				"function": "file_encoding",
+				"exclude_modes": ["nc"],
+				"priority": 60
+			},
+			{
+				"function": "line_percent",
+				"priority": 50,
+				"width": 4,
+				"align": "r"
+			}
+		]
+	}
+}
