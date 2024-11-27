@@ -66,6 +66,9 @@ set clipboard=unnamedplus
 set encoding=utf8
 set t_Co=256
 
+" maps
+nmap oo o<Esc>k
+
 " Vim-plug
 let data_dir = has('nvim') ? stdpath('data') . '/site' : '~/.vim'
 if empty(glob(data_dir . '/autoload/plug.vim'))
@@ -102,6 +105,7 @@ Plug 'prettier/vim-prettier', {
     \ 'do': 'yarn install --frozen-lockfile --production',
     \ 'for': ['javascript', 'typescript', 'css', 'less', 'scss', 'json', 'graphql', 'markdown', 'vue', 'svelte', 'yaml', 'html'] }
 Plug 'scrooloose/nerdtree'
+Plug 'cocopon/iceberg.vim'
 
 call plug#end()
 
@@ -117,3 +121,7 @@ python3 powerline_setup()
 python3 del powerline_setup
 
 let g:airline#extensions#ale#enabled=1
+
+" theme
+set background=dark
+colorscheme iceberg
