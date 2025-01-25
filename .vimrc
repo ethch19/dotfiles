@@ -77,8 +77,8 @@ if empty(glob(data_dir . '/autoload/plug.vim'))
 endif
 
 " ALE configs
-let g:ale_linters = {'rust': ['analyzer', 'cargo']}
-let g:ale_fixers = {'rust': ['rustfmt']}
+let g:ale_linters = {'rust': ['analyzer', 'cargo'], 'python': ['flake8', 'pylint']}
+let g:ale_fixers = {'rust': ['rustfmt'], 'python': ['black', 'isort']}
 
 let g:ale_completion_enabled = 1
 let g:ale_linters_explicit = 1
@@ -116,6 +116,7 @@ au BufRead,BufNewFile *.rs set filetype=rust
 au FocusGained,BufEnter * silent! checktime
 
 " Powerline statusline
+set rtp+=/usr/lib/python3/dist-packages/powerline/bindings/vim
 python3 from powerline.vim import setup as powerline_setup
 python3 powerline_setup()
 python3 del powerline_setup
