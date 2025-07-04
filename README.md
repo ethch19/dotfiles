@@ -1,4 +1,4 @@
-# 🗃️ dotfiles
+# 🗃️ eth's dotfiles
 
 ## ⚙️ Installation
 ### Debian/Ubuntu
