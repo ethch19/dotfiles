@@ -55,7 +55,7 @@ objects=( "home[@]" "dotconfig[@]")
 
 if confirm "Install Wayland config?"; then
 	home+=("greetd_config.toml")
-	dotconfig+=("sway", "waybar", "fuzzel")
+	dotconfig+=("sway" "waybar" "fuzzel")
 fi
 
 if confirm "Install t480 throttled config?"; then 
@@ -63,19 +63,21 @@ if confirm "Install t480 throttled config?"; then
 	throttledvar=1
 fi
 
+mkdir -p ~/.config
+
 for index in ${!directory[@]}; do
 	dir="${directory[$index]}"
 	for obj in ${!objects[$index]}; do 
 		if [[ -f "$obj" ]]; then
 			if [[ ! -f "$dir/$obj" ]]; then
-				default_echo "No current $obj file in $dir"
+				# default_echo "No current $obj file in $dir"
 				ln -s "$cur_dir/$obj" "$dir/$obj"
 				bold_green "🔗 $dir/$obj symlink created"
 			else bold_yellow "$obj symlink in $dir already exists"
 			fi
 		elif [[ -d "$obj" ]]; then
 			if [[ ! -d "$dir/$obj" ]]; then
-				if [[ ! -L "$dir/$obj" ]]; then
+				if [[ -L "$dir/$obj" ]]; then
 					bold_yellow "$obj symlink in $dir already exists"
 				else
 					ln -s "$cur_dir/$obj" "$dir/$obj"
@@ -125,7 +127,7 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
 
 	# git + vim build tools
 	if ! cmd_exist "git"; then
-		sudo apt-get install git make clang libtool-bin libpython3-dev -qq
+		sudo apt-get install git make clang libtool-bin libpython3-dev libncurses-dev -qq
 		bold_green "✅ git installed"
 	fi
 
@@ -199,7 +201,7 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
 
 	# throttled
 	if (( throttledvar )); then
-		if ! cmd_exist "throttled"; then
+		if cmd_exist "throttled"; then # remember to add !, currently removed
 			if confirm "Install throttled?"; then
 				sudo apt-get install git build-essential python3-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev python3-cairo-dev python3-venv python3-wheel -qq
 				git clone https://github.com/erpalma/throttled.git
