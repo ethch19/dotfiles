@@ -30,7 +30,7 @@ confirm() {
 }
 
 cmd_exist() {
-	if command -v "$1" &> /dev/null; then
+	if sudo -u "$SUDO_USER" -i command -v "$1" &> /dev/null; then
 		bold_green "✅ $1 is already installed."
 		return 0
 	else
@@ -38,28 +38,36 @@ cmd_exist() {
 	fi
 }
 
+if [[ -z $SUDO_USER ]]; then
+	bold_red "Run this script with sudo: sudo ./auto_install.sh"
+	exit 1
+fi
+
+INSTALL_HOME=$(getent passwd $SUDO_USER | cut -d: -f6)
 cur_dir=$(pwd)
 no_files="$(ls -1q -log | wc -l)"
 
 if [[ $cur_dir != *"dotfiles"* ]]; then
 	bold_red "Not in dotfiles directory"
-	return 1
+	exit 1
 fi
 default_echo "Number of dotfiles: $no_files"
 
 # symlink creation
 home=(".tmux.conf" ".vimrc" "ethch.omp.toml")
 dotconfig=("powerline")
-directory=( "$HOME" "$HOME/.config")
-objects=( "home[@]" "dotconfig[@]") 
+etc=()
+directory=( "$INSTALL_HOME" "$INSTALL_HOME/.config" "/etc")
+objects=( "home[@]" "dotconfig[@]" "etc[@]") 
 
 if confirm "Install Wayland config?"; then
 	home+=("greetd_config.toml")
 	dotconfig+=("sway" "waybar" "fuzzel")
+	waylandvar=1
 fi
 
 if confirm "Install t480 throttled config?"; then 
-	home+=("throttled.conf")
+	etc+=("throttled.conf")
 	throttledvar=1
 fi
 
@@ -71,7 +79,7 @@ for index in ${!directory[@]}; do
 		if [[ -f "$obj" ]]; then
 			if [[ ! -f "$dir/$obj" ]]; then
 				# default_echo "No current $obj file in $dir"
-				ln -s "$cur_dir/$obj" "$dir/$obj"
+				sudo ln -s "$cur_dir/$obj" "$dir/$obj"
 				bold_green "🔗 $dir/$obj symlink created"
 			else bold_yellow "$obj symlink in $dir already exists"
 			fi
@@ -80,7 +88,7 @@ for index in ${!directory[@]}; do
 				if [[ -L "$dir/$obj" ]]; then
 					bold_yellow "$obj symlink in $dir already exists"
 				else
-					ln -s "$cur_dir/$obj" "$dir/$obj"
+					sudo ln -s "$cur_dir/$obj" "$dir/$obj"
 					bold_green "🔗 $dir/$obj symlink created"
 				fi
 			else bold_yellow "$obj directory in $dir already exists"
@@ -92,7 +100,7 @@ done
 bold_green "🔗 All symlinks created"
 
 if ! confirm "Install apps used in config?"; then
-	return 1
+	exit 1
 fi
 
 # check debian or not
@@ -116,18 +124,21 @@ else
 fi
 
 if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
-	cd $HOME
-	sudo apt-get update -qq && sudo apt-get upgrade -qq
+	cd $INSTALL_HOME
+	# apt-get within userspace?
+	apt-get update -qq && apt-get upgrade -qq
 
 	# This is added prior to oh-my-posh line
 	# Add ~/.local/bin into PATH
-	if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-		echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
+	# CHECK IN USER SPACE NOT ROOT
+	if [[ ":$PATH:" != *":$INSTALL_HOME/.local/bin:"* ]]; then
+		echo "export PATH=$PATH:$INSTALL_HOME/.local/bin" >> ~/.bashrc
 	fi
 
 	# git + vim build tools
+	# CMD_EXIST NEEDS TO CHECK IN USER HOME
 	if ! cmd_exist "git"; then
-		sudo apt-get install git make clang libtool-bin libpython3-dev libncurses-dev -qq
+		apt-get install git make clang libtool-bin libpython3-dev libncurses-dev -qq
 		bold_green "✅ git installed"
 	fi
 
@@ -137,91 +148,113 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
 		cd vim/src
 		./configure --with-features=huge --enable-python3interp
 		make -s
-		sudo make -s install
+		make -s install
 		bold_green "✅ vim installed"
 	fi
 
 	# tmux
 	if ! cmd_exist "tmux"; then
-		sudo apt-get install tmux -qq
+		apt-get install tmux -qq
 		bold_green "✅ tmux installed"
 	fi
 
 	# powerline
 	if ! cmd_exist "powerline"; then
-		sudo apt-get install python3-full python3-pip -qq 
-		venvpath="$HOME/.local/share/powerline-venv"
+		apt-get install python3-full python3-pip -qq 
+		venvpath="$INSTALL_HOME/.local/share/powerline-venv"
 		python3 -m venv --upgrade-deps $venvpath
 		source $venvpath/bin/activate
 		pip install powerline-status
 		deactivate
-		mkdir -p $HOME/.local/bin
+		mkdir -p $INSTALL_HOME/.local/bin
 		ln -s $venvpath/bin/powerline ~/.local/bin/powerline
 		vimrtp=$(find "${venvpath}" -path "*powerline/bindings/vim")
 		if [ -z "$vimrtp" ]; then
 			bold_red "ERROR: Could not find the Powerline vim bindings path. Installation failed."
-			return 1 
+			exit 1 
 		fi
 		bold_yellow "As powerline is installed via venv as a library at $venvpath, check that .vimrc contains this line:\nset rtp+=$vimrtp"
 		sudo apt-get install fontconfig -qq
 		wget -q https://github.com/powerline/powerline/raw/develop/font/PowerlineSymbols.otf
 		wget -q https://github.com/powerline/powerline/raw/develop/font/10-powerline-symbols.conf
-		mkdir -p $HOME/.local/share/fonts
-		mv PowerlineSymbols.otf $HOME/.local/share/fonts/
-		chmod 644 $HOME/.local/share/fonts/PowerlineSymbols.otf
-		sudo fc-cache -vf $HOME/.local/share/fonts/
-		mkdir -p $HOME/.config/fontconfig/conf.d
-		mv 10-powerline-symbols.conf $HOME/.config/fontconfig/conf.d/
-		chmod 644 $HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf
+		mkdir -p $INSTALL_HOME/.local/share/fonts
+		mv PowerlineSymbols.otf $INSTALL_HOME/.local/share/fonts/
+		chmod 644 $INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf
+		sudo fc-cache -vf $INSTALL_HOME/.local/share/fonts/
+		mkdir -p $INSTALL_HOME/.config/fontconfig/conf.d
+		mv 10-powerline-symbols.conf $INSTALL_HOME/.config/fontconfig/conf.d/
+		chmod 644 $INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf
 		bold_yellow "If using WSL on Windows Powershell, the font should be installed on Windows separately."
 		bold_green "✅ powerline installed"
 	fi
 
 	# curl
 	if ! cmd_exist "curl"; then
-		sudo apt-get install curl -qq
+		apt-get install curl -qq
 	fi
 
 	# omp
 	if ! cmd_exist "oh-my-posh"; then
-		sudo apt-get install unzip -qq
+		apt-get install unzip -qq
 		curl -s https://ohmyposh.dev/install.sh | bash -s
 		oh-my-posh font install literationmono
-		echo 'eval "$(oh-my-posh init bash --config ~/ethch.omp.toml)"' >> $HOME/.bashrc
+		echo 'eval "$(oh-my-posh init bash --config ~/ethch.omp.toml)"' >> $INSTALL_HOME/.bashrc
 		default_echo "Oh-my-posh bashrc added"
 		bold_green "✅ oh-my-posh installed"	
 	fi
 	
 
 	# wayland
-	if [[ $waylandvar == [yY] ]]; then
+	if (( $waylandvar )); then
 		bold_yellow "Currently Wayland apps are not supported, as they all require building the binary manually. Do this yourself"
 		bold_yellow "Apps not installed: sway,  waybar, fuzzel, greetd (+ tuigreet)"
 	fi
 
 	# throttled
-	if (( throttledvar )); then
-		if cmd_exist "throttled"; then # remember to add !, currently removed
-			if confirm "Install throttled?"; then
-				sudo apt-get install git build-essential python3-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev python3-cairo-dev python3-venv python3-wheel -qq
+	if (( $throttledvar )); then
+		thrd_dir="/opt/throttled"
+		thrd_wrap="/usr/local/bin/throttled"
+		thrd_sym="$INSTALL_HOME/.local/bin/throttled"
+		if [[ ! -d $thrd_dir ]]; then
+			if confirm "Install throttled?"; then # doesnt technically check whether it has already been installed
+				apt-get install git build-essential python3-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev python3-cairo-dev python3-venv python3-wheel -qq
 				git clone https://github.com/erpalma/throttled.git
-				sudo ./throttled/install.sh
+				./throttled/install.sh
 
 				# stop thermald
-				sudo systemctl stop thermald.service
-				sudo systemctl disable thermald.service
-				sudo systemctl mask thermald.service
+				systemctl stop thermald.service
+				systemctl disable thermald.service
+				systemctl mask thermald.service
 
-				bold_yellow "Check throttled service via 'systemctl status throttled'"
+				#turn ./throttled.py in venv as cli
+				if [[ ! -f $thrd_wrap ]]; then
+					cat > $thrd_wrap << EOF
+#!/bin/bash
+exec "$thrd_dir/venv/bin/python" "$thrd_dir/throttled.py" "\$@"
+EOF
+					chmod +x $thrd_wrap
+				else
+					bold_yellow "throttled wrapper already exist in $thrd_wrap"
+				fi
+
+				if [[ ! -L $thrd_sym ]]; then
+					ln -s $thrd_wrap $thrd_sym
+				else
+					bold_yellow "throttled symlink already exist in $thrd_sym"
+				fi
+
+				bold_yellow "Check throttled service via 'sudo systemctl status throttled'"
 				bold_green "✅ throttled installed"
 			fi
+		else
+			bold_green "✅ throttled is already installed."
 		fi
 	fi
 else 
 	bold_red "OS distro is not Debian or Ubuntu. No apps have been installed"
-	return 1
+	exit 1
 fi
 
 # new shell (refresh) LAST AS ANYTHING AFTER WILL NOT RUN
-cd $HOME
+cd $INSTALL_HOME
 bold_yellow "Refresh bash: exec bash or source ~/.bashrc"
