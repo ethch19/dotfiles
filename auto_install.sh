@@ -61,7 +61,8 @@ directory=( "$INSTALL_HOME" "$INSTALL_HOME/.config" "/etc")
 objects=( "home[@]" "dotconfig[@]" "etc[@]") 
 
 if confirm "Install Wayland config?"; then
-	home+=("greetd_config.toml")
+	directory+=("/etc/greetd")
+	objects+=("greetd_config.toml")
 	dotconfig+=("sway" "waybar" "fuzzel")
 	waylandvar=1
 fi

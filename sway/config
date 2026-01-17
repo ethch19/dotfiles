@@ -160,38 +160,24 @@ mode "resize" {
 }
 bindsym $mod+r mode "resize"
 
+# Fn functions
+#
+# brightnessctl
+bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
+bindsym XF86MonBrightnessUp exec brightnessctl set 5%+
+
+# pulseaudio
+bindsym XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
+bindsym XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%
+bindsym XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%
+bindsym XF86AudioMicMute exec pactl set-source-mute @DEFAULT_SOURCE@ toggle
+
 #
 # Status Bar:
-# Read `man 5 sway-bar` for more information about this section.
 bar swaybar_command waybar
-
-# SOV: workspace nav
-#
-bindsym --no-repeat $mod+1 workspace number 1; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+2 workspace number 2; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+3 workspace number 3; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+4 workspace number 4; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+5 workspace number 5; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+6 workspace number 6; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+7 workspace number 7; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+8 workspace number 8; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+9 workspace number 9; exec "echo 1 > /tmp/sov"
-bindsym --no-repeat $mod+0 workspace number 10; exec "echo 1 > /tmp/sov"
-
-bindsym --release $mod+1 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+2 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+3 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+4 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+5 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+6 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+7 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+8 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+9 exec "echo 0 > /tmp/sov"
-bindsym --release $mod+0 exec "echo 0 > /tmp/sov"
 
 # Start-up exec
 #
-exec rm -f /tmp/sov && mkfifo /tmp/sov && tail -f /tmp/sov | sov -t 200 -k 65515 -v
 exec brightnessctl set 50%
 exec blueman-applet
 
