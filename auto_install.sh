@@ -56,13 +56,14 @@ default_echo "Number of dotfiles: $no_files"
 # symlink creation
 home=(".tmux.conf" ".vimrc" "ethch.omp.toml")
 dotconfig=("powerline")
-etc=()
+etc=("tlp.conf")
+greetd_config=("greetd/config.toml")
 directory=( "$INSTALL_HOME" "$INSTALL_HOME/.config" "/etc")
 objects=( "home[@]" "dotconfig[@]" "etc[@]") 
 
 if confirm "Install Wayland config?"; then
 	directory+=("/etc/greetd")
-	objects+=("greetd_config.toml")
+	objects+=("greetd_config[@]")
 	dotconfig+=("sway" "waybar" "fuzzel")
 	waylandvar=1
 fi
@@ -72,25 +73,37 @@ if confirm "Install t480 throttled config?"; then
 	throttledvar=1
 fi
 
-mkdir -p ~/.config
-
 for index in ${!directory[@]}; do
 	dir="${directory[$index]}"
+	if [ ! -d "$dir" ]; then
+		mkdir -p "$dir"
+		if [[ "$dir" == "$INSTALL_HOME"* ]]; then
+            chown "$SUDO_USER:$SUDO_USER" "$dir"
+        fi
+	fi
 	for obj in ${!objects[$index]}; do 
+		source_path="$cur_dir/$obj"
+		target_path="$dir/$(basename "$obj")"
 		if [[ -f "$obj" ]]; then
-			if [[ ! -f "$dir/$obj" ]]; then
+			if [[ ! -f "$target_path" ]]; then
 				# default_echo "No current $obj file in $dir"
-				sudo ln -s "$cur_dir/$obj" "$dir/$obj"
-				bold_green "🔗 $dir/$obj symlink created"
+				sudo ln -s "$source_path" "$target_path"
+				bold_green "🔗 $target_path symlink created"
 			else bold_yellow "$obj symlink in $dir already exists"
 			fi
 		elif [[ -d "$obj" ]]; then
-			if [[ ! -d "$dir/$obj" ]]; then
-				if [[ -L "$dir/$obj" ]]; then
+			if [[ ! -d "$target_path" ]]; then
+				if [[ -L "$target_path" ]]; then
 					bold_yellow "$obj symlink in $dir already exists"
+				elif [[ -d "$target_path" ]]; then
+					bold_yellow "CONFLICT: Existing directory $obj already exists in $dir"
 				else
-					sudo ln -s "$cur_dir/$obj" "$dir/$obj"
-					bold_green "🔗 $dir/$obj symlink created"
+					sudo ln -s "$source_path" "$target_path"
+					if [ $? -eq 0 ]; then
+						bold_green "🔗 $target_path symlink created"
+					else
+						bold_red "Failed to create symlink for $obj"
+					fi
 				fi
 			else bold_yellow "$obj directory in $dir already exists"
 			fi
@@ -197,18 +210,43 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
 	# omp
 	if ! cmd_exist "oh-my-posh"; then
 		apt-get install unzip -qq
-		curl -s https://ohmyposh.dev/install.sh | bash -s
+		curl -s https://ohmyposh.dev/install.sh | bash -s -- -d ~/usr/local/bin
 		oh-my-posh font install literationmono
 		echo 'eval "$(oh-my-posh init bash --config ~/ethch.omp.toml)"' >> $INSTALL_HOME/.bashrc
 		default_echo "Oh-my-posh bashrc added"
 		bold_green "✅ oh-my-posh installed"	
 	fi
-	
+
+	# tlp
+	if ! cmd_exist "tlp-stat"; then
+		apt-get install tlp tlp-rdw -qq
+		bold_green "✅ tlp installed"	
+	fi
 
 	# wayland
 	if (( $waylandvar )); then
-		bold_yellow "Currently Wayland apps are not supported, as they all require building the binary manually. Do this yourself"
-		bold_yellow "Apps not installed: sway,  waybar, fuzzel, greetd (+ tuigreet)"
+		bold_yellow "The following apps will be installed but targetted for Debian 13 (Trixie): sway,  waybar, fuzzel, greetd (+ tuigreet)"
+		if ! cmd_exist "sway"; then
+			apt-get install sway -qq
+			bold_green "✅ sway installed"	
+		fi
+		if ! cmd_exist "waybar"; then
+			apt-get install waybar -qq
+			bold_green "✅ waybar installed"	
+		fi
+		if ! cmd_exist "fuzzel"; then
+			apt-get install fuzzel -qq
+			bold_green "✅ fuzzel installed"	
+		fi
+		if ! dpkg -l | grep -q "^ii  greetd "; then
+			apt-get install greetd -qq
+			bold_green "✅ greetd installed"	
+			bold_yellow "Remember to enable greetd daemon via systemctl"
+		fi
+		if ! cmd_exist "tuigreet"; then
+			apt-get install tuigreet -qq
+			bold_green "✅ tuigreet installed"	
+		fi
 	fi
 
 	# throttled
