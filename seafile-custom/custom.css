@@ -1,3 +1,14 @@
+body {
+    background: url('/media/custom/background.jpg') no-repeat center center fixed !important;
+    background-size: cover !important;
+}
+
+#wrapper, 
+#main, 
+.login-panel-outer-container {
+    background: transparent !important;
+    background-color: transparent !important;
+}
 #login-bottom .bottom-item { border-right: 1px solid #292d6a;}
 #notice-popover li.unread{border-left:2px solid #292d6a;padding-left:10px;padding-right:10px}
 #share-link-panel .link-authenticated-op:hover{background:transparent;color:#292d6a;text-decoration:underline}
