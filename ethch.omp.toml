@@ -28,6 +28,10 @@ final_space = true
     type = 'session'
     style = 'diamond'
 
+    background_templates = [
+        "{{ if .Env.SSH_CONNECTION }}#2e7d32{{ end }}"
+    ]
+
   [[blocks.segments]]
     leading_diamond = '<transparent,p:blue></>'
     trailing_diamond = ''

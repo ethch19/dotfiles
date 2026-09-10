@@ -53,11 +53,10 @@ set autoindent
 set smartindent
 
 " tabs
-set softtabstop=0
+set softtabstop=4
 set shiftwidth=4
 set tabstop=4
-set noexpandtab
-" set expandtab " convert tabs into spaces, Ctrl-V + tab to use real tab
+set expandtab 
 
 " misc
 set autoread " updates file if changed outside of vim
@@ -65,6 +64,7 @@ set hid " switch buffers without saving current one
 set clipboard=unnamedplus
 set encoding=utf8
 set t_Co=256
+set backupcopy=yes " prevent symlinkg from breaking when saving
 
 " maps
 nmap oo o<Esc>k
@@ -82,8 +82,11 @@ autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
 \| endif
 
 " ALE configs
-let g:ale_linters = {'rust': ['analyzer', 'cargo'], 'python': ['flake8', 'pylint']}
-let g:ale_fixers = {'rust': ['rustfmt'], 'python': ['black', 'isort']}
+let g:ale_completion_enabled = 0
+let g:ale_disable_lsp = 1
+
+let g:ale_linters = {'rust': ['analyzer', 'cargo'], 'python': ['ruff']}
+let g:ale_fixers = {'rust': ['rustfmt'], 'python': ['ruff', 'black']}
 
 let g:ale_completion_enabled = 1
 let g:ale_linters_explicit = 1
@@ -101,6 +104,43 @@ endif
 
 let g:ale_rust_rustfmt_options = '--edition ' .. b:rust_edition
 
+" vim-lsp config
+inoremap <expr> <Tab>   pumvisible() ? "\<C-n>" : "\<Tab>"
+inoremap <expr> <S-Tab> pumvisible() ? "\<C-p>" : "\<S-Tab>"
+inoremap <expr> <cr>    pumvisible() ? asyncomplete#close_popup() : "\<cr>"
+
+function! s:on_lsp_buffer_enabled() abort
+    setlocal omnifunc=lsp#complete
+    setlocal signcolumn=yes
+
+    " Let Ctrl-] jump using LSP definition
+    if exists('+tagfunc') | setlocal tagfunc=lsp#tagfunc | endif
+
+    " Navigation
+    nmap <buffer> gd <plug>(lsp-definition)
+    nmap <buffer> gt <plug>(lsp-type-definition)
+    nmap <buffer> gi <plug>(lsp-implementation)
+    nmap <buffer> gr <plug>(lsp-references)
+    nmap <buffer> gs <plug>(lsp-document-symbol-search)
+    nmap <buffer> gS <plug>(lsp-workspace-symbol-search)
+
+    " Hover & Floating Doc Scroll
+    nmap <buffer> K  <plug>(lsp-hover)
+    nnoremap <buffer> <expr><c-f> lsp#scroll(+4)
+    nnoremap <buffer> <expr><c-d> lsp#scroll(-4)
+
+    " Actions & Diagnostics
+    nmap <buffer> <leader>rn <plug>(lsp-rename)
+    nmap <buffer> [g <plug>(lsp-previous-diagnostic)
+    nmap <buffer> ]g <plug>(lsp-next-diagnostic)
+endfunction
+
+augroup lsp_install
+    autocmd!
+    autocmd User lsp_buffer_enabled call s:on_lsp_buffer_enabled()
+augroup END
+
+
 " Plugins
 call plug#begin()
 
@@ -111,6 +151,10 @@ Plug 'prettier/vim-prettier', {
     \ 'for': ['javascript', 'typescript', 'css', 'less', 'scss', 'json', 'graphql', 'markdown', 'vue', 'svelte', 'yaml', 'html'] }
 Plug 'scrooloose/nerdtree'
 Plug 'cocopon/iceberg.vim'
+Plug 'prabirshrestha/vim-lsp'
+Plug 'mattn/vim-lsp-settings'
+Plug 'prabirshrestha/asyncomplete.vim'
+Plug 'prabirshrestha/asyncomplete-lsp.vim'
 
 call plug#end()
 
@@ -122,7 +166,10 @@ au FocusGained,BufEnter * silent! checktime
 
 " Powerline statusline
 " for vim binding, it must be installed as a library not binary
-set rtp+=/home/ethch/.local/share/powerline-venv/lib/python3.11/site-packages/powerline/bindings/vim
+let s:powerline_path = glob('~/.local/share/powerline-venv/lib/python3.*/site-packages/powerline/bindings/vim', 1)
+if !empty(s:powerline_path)
+    let &runtimepath .= ',' . s:powerline_path
+endif
 
 let g:airline#extensions#ale#enabled=1
 
