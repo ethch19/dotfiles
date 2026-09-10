@@ -222,37 +222,35 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
         bold_green "✅ tmux installed"
     fi
 
-    # powerline
-    if ! cmd_exist "powerline"; then
-        apt-get install python3-full python3-pip -qq 
-        venvpath="$INSTALL_HOME/.local/share/powerline-venv"
-        python3 -m venv --upgrade-deps $venvpath
-        source $venvpath/bin/activate
-        pip install powerline-status
-        deactivate
-        mkdir -p $INSTALL_HOME/.local/bin
+    # powerline in dedicated virtualenv
+    venvpath="$INSTALL_HOME/.local/share/powerline-venv"
+
+    if [ ! -d "$venvpath" ]; then
+        bold_yellow "Installing Powerline and dependencies..."
+        apt-get install -y python3-full python3-pip fontconfig -qq
+
+        sudo -u "$SUDO_USER" python3 -m venv "$venvpath"
+
+        sudo -u "$SUDO_USER" "$venvpath/bin/pip" install --upgrade pip -q
+        sudo -u "$SUDO_USER" "$venvpath/bin/pip" install powerline-status -q
+
+        mkdir -p "$INSTALL_HOME/.local/bin"
         ln -sf "$venvpath/bin/powerline" "$INSTALL_HOME/.local/bin/powerline"
         chown -h "$SUDO_USER:$SUDO_USER" "$INSTALL_HOME/.local/bin/powerline"
-        vimrtp=$(find "${venvpath}" -path "*powerline/bindings/vim")
-        if [ -z "$vimrtp" ]; then
-            bold_red "ERROR: Could not find the Powerline vim bindings path. Installation failed."
-            exit 1 
-        fi
-        bold_yellow "As powerline is installed via venv as a library at $venvpath, check that .vimrc contains this line:\nset rtp+=$vimrtp"
-        sudo apt-get install fontconfig -qq
-        wget -q https://github.com/powerline/powerline/raw/develop/font/PowerlineSymbols.otf
-        wget -q https://github.com/powerline/powerline/raw/develop/font/10-powerline-symbols.conf
-        mkdir -p $INSTALL_HOME/.local/share/fonts
-        mv PowerlineSymbols.otf $INSTALL_HOME/.local/share/fonts/
-        chmod 644 $INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf
-        sudo fc-cache -vf $INSTALL_HOME/.local/share/fonts/
-        mkdir -p $INSTALL_HOME/.config/fontconfig/conf.d
-        mv 10-powerline-symbols.conf $INSTALL_HOME/.config/fontconfig/conf.d/
-        chmod 644 $INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf
-        bold_yellow "If using WSL on Windows Powershell, the font should be installed on Windows separately."
-        bold_green "✅ powerline installed"
-    fi
 
+        mkdir -p "$INSTALL_HOME/.local/share/fonts" "$INSTALL_HOME/.config/fontconfig/conf.d"
+        wget -qO "$INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf" https://github.com/powerline/powerline/raw/develop/font/PowerlineSymbols.otf
+        wget -qO "$INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf" https://github.com/powerline/powerline/raw/develop/font/10-powerline-symbols.conf
+
+        chmod 644 "$INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf"
+        chmod 644 "$INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf"
+        chown -R "$SUDO_USER:$SUDO_USER" "$INSTALL_HOME/.local/share/fonts" "$INSTALL_HOME/.config/fontconfig"
+        fc-cache -vf "$INSTALL_HOME/.local/share/fonts/" >/dev/null
+
+        bold_green "✅ Powerline installed in virtualenv"
+    else
+        bold_green "✅ Powerline virtualenv already exists"
+    fi
 
     # omp
     if ! cmd_exist "oh-my-posh"; then

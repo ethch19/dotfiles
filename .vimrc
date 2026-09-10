@@ -167,12 +167,23 @@ au FocusGained,BufEnter * silent! checktime
 
 " Powerline statusline
 " for vim binding, it must be installed as a library not binary
-let s:powerline_path = glob('~/.local/share/powerline-venv/lib/python3.*/site-packages/powerline/bindings/vim', 1)
-if !empty(s:powerline_path)
-    let &runtimepath .= ',' . s:powerline_path
-endif
+let s:site_packages = glob(expand('~/.local/share/powerline-venv/lib/python3.*/site-packages'), 1)
 
-let g:airline#extensions#ale#enabled=1
+if !empty(s:site_packages) && isdirectory(s:site_packages)
+    let s:powerline_vim = s:site_packages . '/powerline/bindings/vim'
+    if isdirectory(s:powerline_vim)
+        let &runtimepath .= ',' . s:powerline_vim
+    endif
+
+    if has('python3')
+        python3 << EOF
+import sys, vim
+site_packages = vim.eval('s:site_packages')
+if site_packages and site_packages not in sys.path:
+    sys.path.insert(0, site_packages)
+EOF
+    endif
+endif
 
 " theme
 set background=dark
