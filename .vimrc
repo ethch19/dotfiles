@@ -82,15 +82,15 @@ autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
 \| endif
 
 " ALE configs
-let g:ale_completion_enabled = 0
-let g:ale_disable_lsp = 1
-
 let g:ale_linters = {'rust': ['analyzer', 'cargo'], 'python': ['ruff']}
 let g:ale_fixers = {'rust': ['rustfmt'], 'python': ['ruff', 'black']}
 
-let g:ale_completion_enabled = 1
 let g:ale_linters_explicit = 1
 let g:ale_fix_on_save = 1
+let g:ale_completion_enabled = 0
+let g:ale_disable_lsp = 1
+
+let g:ale_python_ruff_options = '--line-length 88 --ignore E501'
 
 let g:ale_rust_cargo_check_tests = 1
 let g:ale_rust_cargo_check_examples = 1
@@ -140,6 +140,7 @@ augroup lsp_install
     autocmd User lsp_buffer_enabled call s:on_lsp_buffer_enabled()
 augroup END
 
+let g:lsp_diagnostics_enabled = 0
 
 " Plugins
 call plug#begin()
