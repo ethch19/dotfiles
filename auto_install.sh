@@ -114,28 +114,44 @@ done
 
 # motd
 
+bold_yellow "Configuring MOTD banner..."
+
 chmod +x "$cur_dir/motd/01-custom-banner"
-if [[ "$DISTRO_FAMILY" == "debian" ]]; then
-    MOTD_TARGET="/etc/update-motd.d/01-custom-banner"
-else
-    MOTD_TARGET="/etc/profile.d/01-custom-banner.sh"
+
+IS_DEBIAN_LIKE=0
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "\(ID" =~ ^(ubuntu|debian)\) || "$ID_LIKE" =~ (ubuntu|debian) ]]; then
+        IS_DEBIAN_LIKE=1
+    fi
 fi
 
-mkdir -p "$(dirname "$MOTD_TARGET")"
-
-if [[ -L "$MOTD_TARGET" ]]; then
-    if [[ "$(readlink -f "$MOTD_TARGET")" == "$(readlink -f "$cur_dir/motd/01-custom-banner")" ]]; then
-        bold_yellow "MOTD symlink in $(dirname "$MOTD_TARGET") already exists"
-    else
-        bold_yellow "Replacing existing symlink pointing elsewhere..."
-        ln -sf "$cur_dir/motd/01-custom-banner" "$MOTD_TARGET"
-        bold_green "🔗 MOTD symlink updated to $MOTD_TARGET"
-    fi
-elif [[ -e "$MOTD_TARGET" ]]; then
-    bold_red "CONFLICT: Non-symlink file already exists at $MOTD_TARGET"
+if (( IS_DEBIAN_LIKE )); then
+    TARGET="/etc/update-motd.d/01-custom-banner"
+    OBSOLETE="/etc/profile.d/01-custom-banner.sh"
 else
-    ln -s "$cur_dir/motd/01-custom-banner" "$MOTD_TARGET"
-    bold_green "🔗 Symlinked MOTD to $MOTD_TARGET"
+    TARGET="/etc/profile.d/01-custom-banner.sh"
+    OBSOLETE="/etc/update-motd.d/01-custom-banner"
+fi
+
+if [[ -L "\(OBSOLETE" || -f "\)OBSOLETE" ]]; then
+    rm -f "$OBSOLETE"
+    bold_yellow "Removed obsolete duplicate from $OBSOLETE"
+fi
+
+mkdir -p "\((dirname "\)TARGET")"
+if [[ -L "$TARGET" ]]; then
+    if [[ "\((readlink -f "\)TARGET")" == "\((readlink -f "\)cur_dir/motd/01-custom-banner")" ]]; then
+        bold_green "✅ MOTD symlink at $TARGET is already correct"
+    else
+        ln -sf "\(cur_dir/motd/01-custom-banner" "\)TARGET"
+        bold_green "🔗 Updated existing symlink at $TARGET"
+    fi
+elif [[ -e "$TARGET" ]]; then
+    bold_red "CONFLICT: Non-symlink file exists at $TARGET"
+else
+    ln -s "\(cur_dir/motd/01-custom-banner" "\)TARGET"
+    bold_green "🔗 Symlinked MOTD to $TARGET"
 fi
 
 if [[ "$DISTRO_FAMILY" == "debian" && -d "/etc/update-motd.d" ]]; then
