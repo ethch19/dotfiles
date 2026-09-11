@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+
+# --- Color Definitions (True ANSI & 256-Color Palette) ---
+ESC=$(printf '\033')
+RESET="${ESC}[0m"
+BOLD="${ESC}[1m"
+
+# Aesthetic Accent Colors
+BANNER_COLOR="${ESC}[38;5;45m"
+ELEC_BLUE="${ESC}[38;5;20m"
+CYAN="${ESC}[36m"
+GREEN="${ESC}[32m"
+YELLOW="${ESC}[33m"
+BLUE="${ESC}[34m"
+RED="${ESC}[31m"
+GRAY="${ESC}[90m"
+
+# --- 0. Top Padding & ASCII Banner ---
+printf "\n\n"
+printf "${BANNER_COLOR}${BOLD}"
+cat << 'EOF'
+  ___| |_| |__   ___| |__     ___  ___ _ ____   _____ _ __ 
+ / _ \ __| '_ \ / __| '_ \   / __|/ _ \ '__\ \ / / _ \ '__|
+|  __/ |_| | | | (__| | | |  \__ \  __/ |   \ V /  __/ |   
+ \___|\__|_| |_|\___|_| |_|  |___/\___|_|    \_/ \___|_|   
+EOF
+printf "${RESET}"
+printf "\n"
+
+# Subtitle in Electronic Blue
+printf "${ELEC_BLUE}${BOLD}"
+cat << 'EOF'
+       ▀█▀  █▄ ▄█  █▀▀█  ██▀  █▀▀█  ▀█▀  ▄██▄  █
+       ▄█▄  █ ▀ █  █▀▀   █▄▄  █▀▀▄  ▄█▄  █▀▀█  █▄▄▄
+EOF
+printf "${RESET}\n"
+printf "\n"
+
+# --- 1. System Info ---
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_NAME="${PRETTY_NAME:-Ubuntu}"
+else
+    OS_NAME=$(uname -s)
+fi
+
+KERNEL=$(uname -sr)
+UPTIME=$(uptime -p 2>/dev/null | sed 's/^up //')
+[ -z "$UPTIME" ] && UPTIME="just booted"
+CURRENT_DATE=$(date +"%A, %d %B %Y, %T %Z")
+
+printf "  ${CYAN}%-14s${RESET} %s\n" "OS:"       "$OS_NAME"
+printf "  ${CYAN}%-14s${RESET} %s\n" "Kernel:"   "$KERNEL"
+printf "  ${CYAN}%-14s${RESET} %s\n" "Uptime:"   "$UPTIME"
+printf "  ${CYAN}%-14s${RESET} %s\n" "Date:"     "$CURRENT_DATE"
+echo ""
+
+# --- 2. Hardware Specs ---
+# CPU
+CPU_MODEL=$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo | sed -E 's/^[ \t]+//; s/[ \t]+$//')
+CPU_CORES=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo)
+[ -z "$CPU_MODEL" ] && CPU_MODEL="Generic Processor"
+CPU_DISPLAY="${CPU_MODEL} (${CPU_CORES} vCPUs)"
+
+# GPU & VRAM
+if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
+    GPU_DISPLAY=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)
+    # Extracts memory in MiB and converts to GB with 1 decimal place
+    GPU_VRAM=$(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | awk -F', ' '{printf "%.1fGB / %.0fGB (%.0f%%)", $1/1024, $2/1024, ($1/$2)*100}')
+else
+    GPU_DISPLAY=$(lspci 2>/dev/null | grep -E "VGA compatible controller|3D controller|Display controller" | head -n1 | sed -E 's/.*: //; s/ \([a-zA-Z0-9 ]+\)$//')
+    GPU_VRAM=""
+fi
+[ -z "$GPU_DISPLAY" ] && GPU_DISPLAY="Integrated / Headless"
+
+# System Memory (GB formatting + configured EXPO/XMP clock speed)
+MEM_USED=$(free -h 2>/dev/null | awk '/^Mem:/ {print $3}' | sed 's/Gi/GB/g; s/Mi/MB/g')
+MEM_TOTAL=$(free -h 2>/dev/null | awk '/^Mem:/ {print $2}' | sed 's/Gi/GB/g; s/Mi/MB/g')
+MEM_TYPE=$(dmidecode -t 17 2>/dev/null | awk -F': ' '/Type:/ && !/Unknown/ && !/Error/ {print $2; exit}')
+
+MEM_SPEED=$(dmidecode -t 17 2>/dev/null | awk -F': ' '/Configured Memory Speed:/ && !/Unknown/ && $2 !~ /^0/ {print $2; exit}')
+[ -z "$MEM_SPEED" ] && MEM_SPEED=$(dmidecode -t 17 2>/dev/null | awk -F': ' '/Configured Clock Speed:/ && !/Unknown/ && $2 !~ /^0/ {print $2; exit}')
+[ -z "$MEM_SPEED" ] && MEM_SPEED=$(dmidecode -t 17 2>/dev/null | awk -F': ' '/Speed:/ && !/Unknown/ && $2 !~ /^0/ {print $2; exit}')
+
+if [ -n "$MEM_SPEED" ]; then
+    MEM_DISPLAY="${MEM_USED} / ${MEM_TOTAL} (${MEM_TYPE:-RAM} @ ${MEM_SPEED})"
+else
+    MEM_DISPLAY="${MEM_USED} / ${MEM_TOTAL}"
+fi
+
+# Print Hardware Section
+printf "  ${BLUE}%-14s${RESET} %s\n" "CPU:"      "$CPU_DISPLAY"
+printf "  ${BLUE}%-14s${RESET} %s\n" "GPU:"      "$GPU_DISPLAY"
+[ -n "$GPU_VRAM" ] && printf "  ${BLUE}%-14s${RESET} %s\n" "VRAM:" "$GPU_VRAM"
+printf "  ${BLUE}%-14s${RESET} %s\n" "RAM:"   "$MEM_DISPLAY"
+echo ""
+
+# --- 3. Network & Services ---
+# Find outbound route interface
+PRIMARY_IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1); exit}')
+
+# Get IPv4 address with subnet mask CIDR notation (e.g. 172.30.3.175/24)
+if [ -n "$PRIMARY_IFACE" ]; then
+    IPV4=$(ip -4 -o addr show dev "$PRIMARY_IFACE" 2>/dev/null | awk '{print $4; exit}')
+fi
+[ -z "$IPV4" ] && IPV4="No IPv4 detected"
+
+# Get IPv6 address
+IPV6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6 / {print $2}' | cut -d/ -f1 | head -n1)
+[ -z "$IPV6" ] && IPV6="None / Disabled"
+
+# DDNS Log Parsing + System Timezone
+DDNS_LOG="/var/log/cf-ddns.log"
+TZ_NAME=$(date +"%Z")
+
+if [ -r "$DDNS_LOG" ] && [ -s "$DDNS_LOG" ]; then
+    LAST_ENTRY=$(tail -n1 "$DDNS_LOG")
+    SYNC_TIME=$(echo "$LAST_ENTRY" | awk '{print $1, $2}')
+    SYNC_STATUS=$(echo "$LAST_ENTRY" | awk -F' - ' '{print $NF}' | tr -d '\r\n')
+    
+    if [ "$SYNC_STATUS" = "SUCCESS" ]; then
+        DDNS_DISPLAY="${SYNC_TIME} ${TZ_NAME} (${GREEN}${SYNC_STATUS}${RESET})"
+    else
+        DDNS_DISPLAY="${SYNC_TIME} ${TZ_NAME} (${RED}${SYNC_STATUS}${RESET})"
+    fi
+else
+    DDNS_DISPLAY="${GRAY}No sync logs found in /var/log/cf-ddns.log${RESET}"
+fi
+
+printf "  ${GREEN}%-14s${RESET} %s\n" "Local IPv4:" "$IPV4"
+printf "  ${GREEN}%-14s${RESET} %s\n" "Local IPv6:" "$IPV6"
+printf "  ${YELLOW}%-14s${RESET} %b\n" "DDNS Sync:"  "$DDNS_DISPLAY"
+
+# --- Color Swatches ---
+echo ""
+echo -e "  \033[41m    \033[42m    \033[43m    \033[44m    \033[45m    \033[46m    \033[47m    \033[0m"
+echo ""

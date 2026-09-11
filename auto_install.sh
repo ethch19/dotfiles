@@ -111,31 +111,86 @@ for index in ${!directory[@]}; do
         fi
     done
 done
+
+# motd
+
+chmod +x "$cur_dir/motd/01-custom-banner"
+if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+    MOTD_TARGET="/etc/update-motd.d/01-custom-banner"
+else
+    MOTD_TARGET="/etc/profile.d/01-custom-banner.sh"
+fi
+
+mkdir -p "$(dirname "$MOTD_TARGET")"
+
+if [[ -L "$MOTD_TARGET" ]]; then
+    if [[ "$(readlink -f "$MOTD_TARGET")" == "$(readlink -f "$cur_dir/motd/01-custom-banner")" ]]; then
+        bold_yellow "MOTD symlink in $(dirname "$MOTD_TARGET") already exists"
+    else
+        bold_yellow "Replacing existing symlink pointing elsewhere..."
+        ln -sf "$cur_dir/motd/01-custom-banner" "$MOTD_TARGET"
+        bold_green "🔗 MOTD symlink updated to $MOTD_TARGET"
+    fi
+elif [[ -e "$MOTD_TARGET" ]]; then
+    bold_red "CONFLICT: Non-symlink file already exists at $MOTD_TARGET"
+else
+    ln -s "$cur_dir/motd/01-custom-banner" "$MOTD_TARGET"
+    bold_green "🔗 Symlinked MOTD to $MOTD_TARGET"
+fi
+
+if [[ "$DISTRO_FAMILY" == "debian" && -d "/etc/update-motd.d" ]]; then
+    chmod -x /etc/update-motd.d/00-header \
+             /etc/update-motd.d/10-help-text \
+             /etc/update-motd.d/50-motd-news \
+             /etc/update-motd.d/50-landscape-sysinfo \
+             /etc/update-motd.d/90-updates-available \
+             /etc/update-motd.d/91-contract-ua-esm-status \
+             /etc/update-motd.d/92-unattended-upgrades \
+             /etc/update-motd.d/95-hwe-eol 2>/dev/null || true
+fi
+
+touch /var/log/cf-ddns.log 2>/dev/null || true
+chown "$SUDO_USER:$SUDO_USER" /var/log/cf-ddns.log 2>/dev/null || true
+chmod 644 /var/log/cf-ddns.log 2>/dev/null || true
+
+bold_green "✅ MOTD installed and configured"
+
 bold_green "🔗 All symlinks created"
+
 
 if ! confirm "Install apps used in config?"; then
     exit 1
 fi
 
-# check debian or not
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$NAME
-    VER=$VERSION_ID
-elif type lsb_release >/dev/null 2>&1; then
-    OS=$(lsb_release -si)
-    VER=$(lsb_release -sr)
-elif [ -f /etc/lsb-release ]; then
-    . /etc/lsb-release
-    OS=$DISTRIB_ID
-    VER=$DISTRIB_RELEASE
-elif [ -f /etc/debian_version ]; then
-    OS=Debian
-    VER=$(cat /etc/debian_version)
-else
-    OS=$(uname -s)
-    VER=$(uname -r)
-fi
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID $ID_LIKE" in
+            *debian*|*ubuntu*) echo "debian" ;;
+            *arch*|*manjaro*|*endeavouros*) echo "arch" ;;
+            *fedora*|*rhel*|*centos*) echo "fedora" ;;
+            *) echo "unknown" ;;
+        esac
+    else
+        echo "unknown"
+    fi
+}
+
+pkg_update() {
+    case "$DISTRO_FAMILY" in
+        debian) apt-get update -qq && apt-get upgrade -qq ;;
+        arch)   pacman -Syu --noconfirm -q ;;
+        fedora) dnf upgrade -y -q ;;
+    esac
+}
+
+pkg_install() {
+    case "$DISTRO_FAMILY" in
+        debian) apt-get install -y -qq "$@" ;;
+        arch)   pacman -S --noconfirm --needed -q "$@" ;;
+        fedora) dnf install -y -q "$@" ;;
+    esac
+}
 
 vim_has_python_and_lua() {
 	if sudo -u "$SUDO_USER" -i command -v vim &> /dev/null; then
@@ -152,24 +207,30 @@ vim_has_python_and_lua() {
 	return 1
 }
 
-if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
-    cd $INSTALL_HOME
-    # apt-get within userspace?
-    apt-get update -qq && apt-get upgrade -qq
+if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
+    cd "$INSTALL_HOME" || exit 1
+    pkg_update
 
-    # This is added prior to oh-my-posh line
-    # Add ~/.local/bin into PATH
-    # CHECK IN USER SPACE NOT ROOT
+    # PATH setup
     if [[ ":$PATH:" != *":$INSTALL_HOME/.local/bin:"* ]]; then
         echo "export PATH=\$PATH:$INSTALL_HOME/.local/bin" >> "$INSTALL_HOME/.bashrc"
     fi
 
     # git + vim build tools
-    # CMD_EXIST NEEDS TO CHECK IN USER HOME
     bold_yellow "Ensuring build dependencies and headers are installed..."
-    apt-get install -y --no-upgrade \
-        git make clang libtool-bin libncurses-dev \
-        libpython3-dev libluajit-5.1-dev luajit pkg-config -qq
+    case "$DISTRO_FAMILY" in
+        debian)
+            pkg_install git make clang libtool-bin libncurses-dev \
+                        libpython3-dev libluajit-5.1-dev luajit pkg-config
+            ;;
+        arch)
+            pkg_install base-devel git clang ncurses python luajit pkgconf
+            ;;
+        fedora)
+            pkg_install git make clang libtool ncurses-devel \
+                        python3-devel luajit-devel pkgconf
+            ;;
+    esac
     bold_green "✅ Build tools and libraries verified"
 
     # vim
@@ -191,17 +252,19 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
 		cd "$INSTALL_HOME" || exit 1
 
 		# Point system alternatives and clear cache so /usr/local/bin/vim takes precedence
-		update-alternatives --install /usr/bin/vim vim /usr/local/bin/vim 100
-		update-alternatives --set vim /usr/local/bin/vim
-		hash -r 2>/dev/null
+        if command -v update-alternatives &>/dev/null; then
+            update-alternatives --install /usr/bin/vim vim /usr/local/bin/vim 100
+            update-alternatives --set vim /usr/local/bin/vim
+        fi
+        hash -r 2>/dev/null
 
 		bold_green "✅ vim installed with +python3 and +lua"
     fi
 
     # curl
-    if ! cmd_exist "curl"; then
-        apt-get install curl -qq
-    fi
+    ! cmd_exist "curl" && pkg_install curl
+    ! cmd_exist "tmux" && pkg_install tmux
+    ! cmd_exist "unzip" && pkg_install unzip
 
     # vim-plug
     plug_file="$INSTALL_HOME/.vim/autoload/plug.vim"
@@ -216,18 +279,16 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
     sudo -u "$SUDO_USER" vim -es -u "$INSTALL_HOME/.vimrc" -i NONE -c "PlugInstall --sync" -c "qa"
     bold_green "✅ vim plugins installed"
 
-    # tmux
-    if ! cmd_exist "tmux"; then
-        apt-get install tmux -qq
-        bold_green "✅ tmux installed"
-    fi
-
     # powerline in dedicated virtualenv
     venvpath="$INSTALL_HOME/.local/share/powerline-venv"
 
     if [ ! -d "$venvpath" ]; then
         bold_yellow "Installing Powerline and dependencies..."
-        apt-get install -y python3-full python3-pip fontconfig -qq
+        case "$DISTRO_FAMILY" in
+            debian) pkg_install python3-full python3-pip fontconfig ;;
+            arch)   pkg_install python python-pip fontconfig ;;
+            fedora) pkg_install python3-pip fontconfig ;;
+        esac
 
         sudo -u "$SUDO_USER" python3 -m venv "$venvpath"
 
@@ -254,7 +315,6 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
 
     # omp
     if ! cmd_exist "oh-my-posh"; then
-        apt-get install unzip -qq
         curl -s https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin
         oh-my-posh font install literationmono
         echo 'eval "$(oh-my-posh init bash --config ~/ethch.omp.toml)"' >> $INSTALL_HOME/.bashrc
@@ -263,75 +323,86 @@ if [[ ${OS,,} == *"debian"* || ${OS,,} == *"ubuntu"* ]]; then
     fi
 
     if (( laptop )); then
-        # tlp
-        if ! cmd_exist "tlp-stat"; then
-            apt-get install tlp tlp-rdw -qq
-            bold_green "✅ tlp installed"
-        fi
+        # TLP
+        ! cmd_exist "tlp-stat" && pkg_install tlp
+        bold_green "✅ tlp installed"
 
-        # wayland
-        bold_yellow "The following apps will be installed but targetted for Debian 13 (Trixie): sway,  waybar, fuzzel, greetd (+ tuigreet)"
-        if ! cmd_exist "sway"; then
-            apt-get install sway -qq
-            bold_green "✅ sway installed"
-        fi
-        if ! cmd_exist "waybar"; then
-            apt-get install waybar -qq
-            bold_green "✅ waybar installed"
-        fi
-        if ! cmd_exist "fuzzel"; then
-            apt-get install fuzzel -qq
-            bold_green "✅ fuzzel installed"
-        fi
-        if ! dpkg -l | grep -q "^ii  greetd "; then
-            apt-get install greetd -qq
-            bold_green "✅ greetd installed"
-            bold_yellow "Remember to enable greetd daemon via systemctl"
-        fi
-        if ! cmd_exist "tuigreet"; then
-            apt-get install tuigreet -qq
-            bold_green "✅ tuigreet installed"
-        fi
+        # Wayland utilities
+        ! cmd_exist "sway" && pkg_install sway
+        bold_green "✅ sway installed"
+        ! cmd_exist "waybar" && pkg_install waybar
+        bold_green "✅ waybar installed"
+        ! cmd_exist "fuzzel" && pkg_install fuzzel
+        bold_green "✅ fuzzel installed"
+        
+        case "$DISTRO_FAMILY" in
+            debian) pkg_install greetd tuigreet ;;
+            arch)   pkg_install greetd greetd-tuigreet ;;
+            fedora) pkg_install greetd tuigreet ;;
+        esac
+        bold_green "✅ tuigreet installed"
+        bold_green "✅ greetd installed"
+        bold_yellow "Remember to enable greetd daemon via systemctl"
 
         # throttled
         thrd_dir="/opt/throttled"
         thrd_wrap="/usr/local/bin/throttled"
         thrd_sym="$INSTALL_HOME/.local/bin/throttled"
-        if [[ ! -d $thrd_dir ]]; then
-            apt-get install git build-essential python3-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev python3-cairo-dev python3-venv python3-wheel -qq
-            git clone https://github.com/erpalma/throttled.git
-            ./throttled/install.sh
 
-            # stop thermald
-            systemctl stop thermald.service
-            systemctl disable thermald.service
-            systemctl mask thermald.service
+        if ! grep -q "GenuineIntel" /proc/cpuinfo; then
+            bold_yellow "⚠️  Skipping throttled: Not an Intel CPU"
+        elif [[ ! -d $thrd_dir ]]; then
+            bold_yellow "Installing throttled dependencies..."
+            case "$DISTRO_FAMILY" in
+                debian)
+                    pkg_install git build-essential python3-dev libdbus-glib-1-dev \
+                                libgirepository1.0-dev libcairo2-dev python3-cairo-dev \
+                                python3-venv python3-wheel
+                    ;;
+                arch)
+                    pkg_install git base-devel python dbus-glib \
+                                gobject-introspection cairo python-cairo
+                    ;;
+                fedora)
+                    pkg_install git gcc make python3-devel dbus-glib-devel \
+                                gobject-introspection-devel cairo-devel python3-cairo-devel \
+                                python3-wheel
+                    ;;
+            esac
 
-            #turn ./throttled.py in venv as cli
+            git clone https://github.com/erpalma/throttled.git /tmp/throttled-src
+            cd /tmp/throttled-src || exit 1
+            ./install.sh
+            rm -rf /tmp/throttled-src
+            cd "$INSTALL_HOME" || exit 1
+
+            # Disable thermald service if present
+            if systemctl list-unit-files | grep -q "thermald.service"; then
+                systemctl stop thermald.service 2>/dev/null || true
+                systemctl disable thermald.service 2>/dev/null || true
+                systemctl mask thermald.service 2>/dev/null || true
+            fi
+
+            # Wrapper for CLI execution inside the venv
             if [[ ! -f $thrd_wrap ]]; then
-                cat > $thrd_wrap << EOF
+                cat > "$thrd_wrap" << 'EOF'
 #!/bin/bash
-exec "$thrd_dir/venv/bin/python" "$thrd_dir/throttled.py" "\$@"
+exec "/opt/throttled/venv/bin/python" "/opt/throttled/throttled.py" "$@"
 EOF
-chmod +x $thrd_wrap
-else
-    bold_yellow "throttled wrapper already exist in $thrd_wrap"
+                chmod +x "$thrd_wrap"
             fi
 
             if [[ ! -L $thrd_sym ]]; then
-                ln -s $thrd_wrap $thrd_sym
-            else
-                bold_yellow "throttled symlink already exist in $thrd_sym"
+                ln -sf "$thrd_wrap" "$thrd_sym"
             fi
 
-            bold_yellow "Check throttled service via 'sudo systemctl status throttled'"
-            bold_green "✅ throttled installed"
+            bold_green "✅ throttled installed and service started"
         else
             bold_green "✅ throttled is already installed."
         fi
     fi
 else 
-    bold_red "OS distro is not Debian or Ubuntu. No apps have been installed"
+    bold_red "OS distro cannot be found. No apps have been installed"
     exit 1
 fi
 
