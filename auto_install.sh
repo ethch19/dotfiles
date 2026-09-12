@@ -1,5 +1,23 @@
 #!/bin/bash
 
+set -o pipefail
+
+CLEAN_INSTALL=0
+# Keep Vim and Powerline on the system Python, even from an activated venv.
+PYTHON_BIN="${PYTHON_BIN:-/usr/bin/python3}"
+
+case "${1:-}" in
+    --clean)
+        CLEAN_INSTALL=1
+        ;;
+    "")
+        ;;
+    *)
+        printf 'Usage: %s [--clean]\n' "$0" >&2
+        exit 2
+        ;;
+esac
+
 bold_red() {
     echo -e "\033[31m$1\033[0m"
 }
@@ -16,44 +34,203 @@ default_echo() {
     echo -e "\033[37m$1\033[0m"
 }
 
+die() {
+    bold_red "$*"
+    exit 1
+}
+
+append_once() {
+    local line="$1"
+    local file="$2"
+
+    touch "$file" \
+        || die "Could not create or access: $file"
+
+    if ! grep -Fqx -- "$line" "$file"; then
+        printf '%s\n' "$line" >> "$file" \
+            || die "Could not update: $file"
+    fi
+
+    chown "$SUDO_USER:$INSTALL_GROUP" "$file" \
+        || die "Could not set ownership on: $file"
+}
+
+cleanup_backup_root=""
+cleanup_system_backup_root=""
+
+
+initialise_cleanup_backups() {
+    local timestamp
+
+    timestamp=$(date +%Y%m%d-%H%M%S)
+
+    cleanup_backup_root="$INSTALL_HOME/.local/share/auto_install-backups/$timestamp"
+    cleanup_system_backup_root="/root/auto_install-backups/$timestamp"
+
+    install -d -o "$SUDO_USER" -g "$INSTALL_GROUP" "$cleanup_backup_root" \
+        || die "Could not create user backup directory."
+
+    install -d -m 700 "$cleanup_system_backup_root" \
+        || die "Could not create system backup directory."
+
+    bold_yellow "Clean-install backups will be saved to:"
+    default_echo "  User files:   $cleanup_backup_root"
+    default_echo "  System files: $cleanup_system_backup_root"
+}
+
+
+backup_managed_path() {
+    local target_path="$1"
+    local backup_root
+    local relative_path
+    local backup_path
+
+    # Nothing exists at this location, including no dangling symlink.
+    if [[ ! -e "$target_path" && ! -L "$target_path" ]]; then
+        return 0
+    fi
+
+    if [[ "$target_path" == "$INSTALL_HOME"/* ]]; then
+        backup_root="$cleanup_backup_root"
+        relative_path="${target_path#"$INSTALL_HOME"/}"
+    else
+        backup_root="$cleanup_system_backup_root"
+        relative_path="${target_path#/}"
+    fi
+
+    backup_path="$backup_root/$relative_path"
+
+    mkdir -p -- "$(dirname -- "$backup_path")" \
+        || die "Could not create backup directory for: $target_path"
+
+    mv -- "$target_path" "$backup_path" \
+        || die "Could not back up existing path: $target_path"
+
+    bold_yellow "Backed up existing path: $target_path"
+}
+
+
+clean_selected_symlink_targets() {
+    local index
+    local dir
+    local array_ref
+    local obj
+    local target_path
+
+    for index in "${!directory[@]}"; do
+        dir="${directory[$index]}"
+        array_ref="${objects[$index]}"
+        declare -n items="$array_ref"
+
+        for obj in "${items[@]}"; do
+            target_path="$dir/$(basename -- "$obj")"
+            backup_managed_path "$target_path"
+        done
+    done
+}
+
+
+clean_user_tooling() {
+    backup_managed_path "$INSTALL_HOME/.local/share/powerline-venv"
+    backup_managed_path "$INSTALL_HOME/.local/bin/powerline"
+    backup_managed_path "$INSTALL_HOME/.local/bin/throttled"
+
+    backup_managed_path "$INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf"
+    backup_managed_path "$INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf"
+
+    backup_managed_path "$INSTALL_HOME/.vim/autoload/plug.vim"
+    backup_managed_path "$INSTALL_HOME/.vim/plugged"
+}
+
 confirm() {
     local prompt="$1"
     local answer
 
-    read -r -n 1 -p "$(default_echo "$prompt (y/N), default: yes: ")" answer
+    read -r -n 1 -p "$(default_echo "$prompt (y/N): ")" answer
     echo
 
-    case $answer in
-        [yY] | "") return 0;;
-        *) return 1;;
+    case "$answer" in
+        [yY]) return 0 ;;
+        *)    return 1 ;;
     esac
 }
 
-cmd_exist() {
-    if sudo -u "$SUDO_USER" -i command -v "$1" &> /dev/null; then
+
+cmd_exists() {
+    if command -v -- "$1" >/dev/null 2>&1; then
         bold_green "✅ $1 is already installed."
         return 0
-    else
-        return 1
     fi
+    return 1
 }
 
-if [[ -z $SUDO_USER ]]; then
-    bold_red "Run this script with sudo: sudo ./auto_install.sh"
-    exit 1
+if (( EUID != 0 )); then
+    die "Run this script with sudo: sudo ./auto_install.sh"
 fi
 
-INSTALL_HOME=$(getent passwd $SUDO_USER | cut -d: -f6)
-cur_dir=$(pwd)
-no_files="$(ls -1q -log | wc -l)"
+if [[ -z "${SUDO_USER:-}" || "$SUDO_USER" == "root" ]]; then
+    die "Run this from an unprivileged account via sudo, not from a root login."
+fi
 
-if [[ $cur_dir != *"dotfiles"* ]]; then
-    bold_red "Not in dotfiles directory"
-    exit 1
+detect_distro() {
+    local os_release
+
+    if [ -r /etc/os-release ]; then
+        os_release=/etc/os-release
+    elif [ -r /usr/lib/os-release ]; then
+        os_release=/usr/lib/os-release
+    else
+        echo "unknown"
+        return 0
+    fi
+
+    # shellcheck disable=SC1090
+    . "$os_release"
+
+    case "${ID:-} ${ID_LIKE:-}" in
+        *debian*|*ubuntu*)
+            echo "debian"
+            ;;
+        *arch*|*manjaro*|*endeavouros*)
+            echo "arch"
+            ;;
+        *fedora*|*rhel*|*centos*)
+            echo "fedora"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+DISTRO_FAMILY=$(detect_distro)
+
+INSTALL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+INSTALL_GROUP=$(id -gn "$SUDO_USER") \
+    || die "Could not determine the primary group for $SUDO_USER."
+
+if [[ -z "$INSTALL_HOME" || ! -d "$INSTALL_HOME" ]]; then
+    die "Could not determine a valid home directory for $SUDO_USER."
+fi
+
+install -d -o "$SUDO_USER" -g "$INSTALL_GROUP" \
+    "$INSTALL_HOME/.config" \
+    "$INSTALL_HOME/.local" \
+    "$INSTALL_HOME/.local/bin" \
+    "$INSTALL_HOME/.local/share" \
+    || die "Could not create required user directories."
+
+cur_dir=$(pwd -P)
+no_files=$(find "$cur_dir" -mindepth 1 -maxdepth 1 -printf '.' | wc -c)
+
+if [[ "$(basename -- "$cur_dir")" != "dotfiles" ]]; then
+    die "Run this script from the dotfiles repository root."
 fi
 default_echo "Number of dotfiles: $no_files"
 
 # base config 
+# shellcheck disable=SC2034
+# Accessed indirectly through objects[] and declare -n items.
 home=(".tmux.conf" ".vimrc" "ethch.omp.toml")
 dotconfig=("powerline")
 etc=()
@@ -73,103 +250,141 @@ if confirm "Install laptop configuration and apps (TLP, Throttled, Wayland)?"; t
     objects+=("etc[@]" "greetd_config[@]")
 fi
 
-for index in ${!directory[@]}; do
+if (( CLEAN_INSTALL )); then
+    if confirm "Clean old managed configuration and back it up before installation?"; then
+        initialise_cleanup_backups
+        clean_selected_symlink_targets
+        clean_user_tooling
+        bold_green "✅ Previous managed user configuration backed up."
+    else
+        die "Clean install cancelled."
+    fi
+fi
+
+for index in "${!directory[@]}"; do
     dir="${directory[$index]}"
-    if [ ! -d "$dir" ]; then
-        mkdir -p "$dir"
+    array_ref="${objects[$index]}"
+    declare -n items="$array_ref"
+
+    if [[ ! -d "$dir" ]]; then
+        mkdir -p -- "$dir" || die "Could not create directory: $dir"
+
         if [[ "$dir" == "$INSTALL_HOME"* ]]; then
-            chown "$SUDO_USER:$SUDO_USER" "$dir"
+            chown "$SUDO_USER:$INSTALL_GROUP" "$dir" \
+                || die "Could not set ownership on: $dir"
         fi
     fi
-    for obj in ${!objects[$index]}; do 
+
+    for obj in "${items[@]}"; do
         source_path="$cur_dir/$obj"
-        target_path="$dir/$(basename "$obj")"
-        if [[ -f "$obj" ]]; then
-            if [[ ! -f "$target_path" ]]; then
-                # default_echo "No current $obj file in $dir"
-                sudo ln -s "$source_path" "$target_path"
-                bold_green "🔗 $target_path symlink created"
-            else bold_yellow "$obj symlink in $dir already exists"
+        target_path="$dir/$(basename -- "$obj")"
+
+        if [[ -f "$source_path" || -d "$source_path" ]]; then
+            :
+        else
+            bold_red "Invalid file/directory: $source_path"
+            exit 1
+        fi
+
+        if [[ -L "$target_path" ]]; then
+            if [[ "$(readlink -f -- "$target_path")" == "$(readlink -f -- "$source_path")" ]]; then
+                bold_green "✅ Symlink already correct: $target_path"
+            else
+                bold_red "CONFLICT: $target_path is a symlink to a different target"
+                exit 1
             fi
-        elif [[ -d "$obj" ]]; then
-            if [[ ! -d "$target_path" ]]; then
-                if [[ -L "$target_path" ]]; then
-                    bold_yellow "$obj symlink in $dir already exists"
-                elif [[ -d "$target_path" ]]; then
-                    bold_yellow "CONFLICT: Existing directory $obj already exists in $dir"
-                else
-                    sudo ln -s "$source_path" "$target_path"
-                    if [ $? -eq 0 ]; then
-                        bold_green "🔗 $target_path symlink created"
-                    else
-                        bold_red "Failed to create symlink for $obj"
-                    fi
-                fi
-            else bold_yellow "$obj directory in $dir already exists"
-            fi
-        else bold_red "Invalid file/directory: $obj"
+        elif [[ -e "$target_path" ]]; then
+            bold_red "CONFLICT: Existing non-symlink path: $target_path"
+            exit 1
+        else
+            ln -s -- "$source_path" "$target_path" || {
+                bold_red "Failed to create symlink: $target_path"
+                exit 1
+            }
+            bold_green "🔗 Created: $target_path"
         fi
     done
 done
 
 # motd
+if confirm "Install and configure the custom MOTD banner?"; then
+    bold_yellow "Configuring MOTD banner..."
 
-bold_yellow "Configuring MOTD banner..."
+    MOTD_SOURCE="$cur_dir/motd/01-custom-banner"
 
-chmod +x "$cur_dir/motd/01-custom-banner"
-
-IS_DEBIAN_LIKE=0
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    if [[ "\(ID" =~ ^(ubuntu|debian)\) || "$ID_LIKE" =~ (ubuntu|debian) ]]; then
-        IS_DEBIAN_LIKE=1
+    if [[ ! -f "$MOTD_SOURCE" ]]; then
+        die "Missing MOTD source: $MOTD_SOURCE"
     fi
-fi
 
-if (( IS_DEBIAN_LIKE )); then
-    TARGET="/etc/update-motd.d/01-custom-banner"
-    OBSOLETE="/etc/profile.d/01-custom-banner.sh"
-else
-    TARGET="/etc/profile.d/01-custom-banner.sh"
-    OBSOLETE="/etc/update-motd.d/01-custom-banner"
-fi
+    chmod +x "$MOTD_SOURCE" \
+        || die "Could not make MOTD source executable: $MOTD_SOURCE"
 
-if [[ -L "\(OBSOLETE" || -f "\)OBSOLETE" ]]; then
-    rm -f "$OBSOLETE"
-    bold_yellow "Removed obsolete duplicate from $OBSOLETE"
-fi
-
-mkdir -p "\((dirname "\)TARGET")"
-if [[ -L "$TARGET" ]]; then
-    if [[ "\((readlink -f "\)TARGET")" == "\((readlink -f "\)cur_dir/motd/01-custom-banner")" ]]; then
-        bold_green "✅ MOTD symlink at $TARGET is already correct"
+    # Use update-motd only when the distro actually provides that mechanism.
+    if [[ "$DISTRO_FAMILY" == "debian" && -d /etc/update-motd.d ]]; then
+        TARGET="/etc/update-motd.d/01-custom-banner"
+        OBSOLETE="/etc/profile.d/01-custom-banner.sh"
     else
-        ln -sf "\(cur_dir/motd/01-custom-banner" "\)TARGET"
-        bold_green "🔗 Updated existing symlink at $TARGET"
+        TARGET="/etc/profile.d/01-custom-banner.sh"
+        OBSOLETE="/etc/update-motd.d/01-custom-banner"
     fi
-elif [[ -e "$TARGET" ]]; then
-    bold_red "CONFLICT: Non-symlink file exists at $TARGET"
+
+    if (( CLEAN_INSTALL )); then
+        backup_managed_path "$TARGET"
+        backup_managed_path "$OBSOLETE"
+    fi
+
+    # Remove an obsolete managed symlink, but never delete an ordinary file.
+    if [[ -L "$OBSOLETE" ]]; then
+        rm -f -- "$OBSOLETE" \
+            || die "Could not remove obsolete MOTD symlink: $OBSOLETE"
+
+        bold_yellow "Removed obsolete MOTD symlink from $OBSOLETE"
+    elif [[ -e "$OBSOLETE" ]]; then
+        die "CONFLICT: Existing non-symlink MOTD file at $OBSOLETE"
+    fi
+
+    mkdir -p -- "$(dirname -- "$TARGET")" \
+        || die "Could not create MOTD target directory."
+
+    if [[ -L "$TARGET" ]]; then
+        if [[ "$(readlink -f -- "$TARGET")" == "$(readlink -f -- "$MOTD_SOURCE")" ]]; then
+            bold_green "✅ MOTD symlink at $TARGET is already correct"
+        else
+            ln -sfn -- "$MOTD_SOURCE" "$TARGET" \
+                || die "Could not update MOTD symlink at $TARGET."
+
+            bold_green "🔗 Updated existing MOTD symlink at $TARGET"
+        fi
+    elif [[ -e "$TARGET" ]]; then
+        die "CONFLICT: Non-symlink file exists at $TARGET"
+    else
+        ln -s -- "$MOTD_SOURCE" "$TARGET" \
+            || die "Could not create MOTD symlink at $TARGET."
+
+        bold_green "🔗 Symlinked MOTD to $TARGET"
+    fi
+
+    if [[ "$DISTRO_FAMILY" == "debian" && -d "/etc/update-motd.d" ]]; then
+        chmod -x /etc/update-motd.d/00-header \
+                 /etc/update-motd.d/10-help-text \
+                 /etc/update-motd.d/50-motd-news \
+                 /etc/update-motd.d/50-landscape-sysinfo \
+                 /etc/update-motd.d/90-updates-available \
+                 /etc/update-motd.d/91-contract-ua-esm-status \
+                 /etc/update-motd.d/92-unattended-upgrades \
+                 /etc/update-motd.d/95-hwe-eol \
+                 2>/dev/null || true
+    fi
+
+    # CF-DDNS log file
+    touch /var/log/cf-ddns.log 2>/dev/null || true
+    chown "$SUDO_USER:$INSTALL_GROUP" /var/log/cf-ddns.log 2>/dev/null || true
+    chmod 644 /var/log/cf-ddns.log 2>/dev/null || true
+
+    bold_green "✅ MOTD installed and configured"
 else
-    ln -s "\(cur_dir/motd/01-custom-banner" "\)TARGET"
-    bold_green "🔗 Symlinked MOTD to $TARGET"
+    bold_yellow "Skipping MOTD installation."
 fi
-
-if [[ "$DISTRO_FAMILY" == "debian" && -d "/etc/update-motd.d" ]]; then
-    chmod -x /etc/update-motd.d/00-header \
-             /etc/update-motd.d/10-help-text \
-             /etc/update-motd.d/50-motd-news \
-             /etc/update-motd.d/50-landscape-sysinfo \
-             /etc/update-motd.d/90-updates-available \
-             /etc/update-motd.d/91-contract-ua-esm-status \
-             /etc/update-motd.d/92-unattended-upgrades \
-             /etc/update-motd.d/95-hwe-eol 2>/dev/null || true
-fi
-
-touch /var/log/cf-ddns.log 2>/dev/null || true
-chown "$SUDO_USER:$SUDO_USER" /var/log/cf-ddns.log 2>/dev/null || true
-chmod 644 /var/log/cf-ddns.log 2>/dev/null || true
-
-bold_green "✅ MOTD installed and configured"
 
 bold_green "🔗 All symlinks created"
 
@@ -178,59 +393,100 @@ if ! confirm "Install apps used in config?"; then
     exit 1
 fi
 
-detect_distro() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        case "$ID $ID_LIKE" in
-            *debian*|*ubuntu*) echo "debian" ;;
-            *arch*|*manjaro*|*endeavouros*) echo "arch" ;;
-            *fedora*|*rhel*|*centos*) echo "fedora" ;;
-            *) echo "unknown" ;;
-        esac
-    else
-        echo "unknown"
-    fi
+pkg_refresh() {
+    case "$DISTRO_FAMILY" in
+        debian)
+            apt-get update -qq
+            ;;
+        arch)
+            pacman -Sy --noconfirm -q
+            ;;
+        fedora)
+            dnf makecache -q
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
-pkg_update() {
+pkg_upgrade() {
     case "$DISTRO_FAMILY" in
-        debian) apt-get update -qq && apt-get upgrade -qq ;;
-        arch)   pacman -Syu --noconfirm -q ;;
-        fedora) dnf upgrade -y -q ;;
+        debian)
+            apt-get upgrade -y -qq
+            ;;
+        arch)
+            pacman -Syu --noconfirm -q
+            ;;
+        fedora)
+            dnf upgrade -y -q
+            ;;
+        *)
+            return 1
+            ;;
     esac
 }
 
 pkg_install() {
     case "$DISTRO_FAMILY" in
-        debian) apt-get install -y -qq "$@" ;;
-        arch)   pacman -S --noconfirm --needed -q "$@" ;;
-        fedora) dnf install -y -q "$@" ;;
-    esac
+        debian)
+            apt-get install -y -qq "$@"
+            ;;
+        arch)
+            pacman -S --noconfirm --needed -q "$@"
+            ;;
+        fedora)
+            dnf install -y -q "$@"
+            ;;
+        *)
+            die "Unsupported distribution family: $DISTRO_FAMILY"
+            ;;
+    esac || die "Package installation failed: $*"
 }
 
 vim_has_python_and_lua() {
-	if sudo -u "$SUDO_USER" -i command -v vim &> /dev/null; then
-		local v_out
-		v_out=$(sudo -u "$SUDO_USER" -i vim --version 2>/dev/null)
-		if echo "$v_out" | grep -q '\+python3' && echo "$v_out" | grep -q '\+lua'; then
-			bold_green "✅ vim with +python3 and +lua is already installed."
-			return 0
-		else
-			bold_yellow "⚠️  vim is missing +python3 or +lua support."
-			return 1
-		fi
-	fi
-	return 1
+    local v_out
+
+    if ! command -v vim >/dev/null 2>&1; then
+        return 1
+    fi
+
+    v_out=$(vim --version 2>/dev/null) || return 1
+
+    if ! grep -q '+python3' <<<"$v_out" || ! grep -q '+lua' <<<"$v_out"; then
+        bold_yellow "⚠️  vim is missing +python3 or +lua support."
+        return 1
+    fi
+
+    if ! env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
+        EXPECTED_PYTHON_PREFIX="$PYTHON_PREFIX" \
+        vim -Nu NONE -n -es \
+        -c 'if !has("python3") || !has("lua") | cquit 1 | endif' \
+        -c 'python3 import os, sys; assert sys.prefix == os.environ["EXPECTED_PYTHON_PREFIX"]; import ctypes' \
+        -c 'qa!'; then
+        bold_yellow "⚠️  vim advertises Python/Lua support, but it is not usable at runtime."
+        return 1
+    fi
+
+    bold_green "✅ vim with usable +python3 and +lua is already installed."
+    return 0
 }
 
 if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
-    cd "$INSTALL_HOME" || exit 1
-    pkg_update
+    cd "$INSTALL_HOME" || die "Could not enter $INSTALL_HOME."
+
+    pkg_refresh || die "Package metadata refresh failed."
+
+    if confirm "Perform a full system package upgrade before installing dependencies?"; then
+        pkg_upgrade || die "Full system package upgrade failed."
+    fi
 
     # PATH setup
-    if [[ ":$PATH:" != *":$INSTALL_HOME/.local/bin:"* ]]; then
-        echo "export PATH=\$PATH:$INSTALL_HOME/.local/bin" >> "$INSTALL_HOME/.bashrc"
-    fi
+    # shellcheck disable=SC2016
+    # $PATH and $HOME must expand later when .bashrc is sourced.
+    append_once \
+        'export PATH="$HOME/.local/bin:$PATH"' \
+        "$INSTALL_HOME/.bashrc"
 
     # git + vim build tools
     bold_yellow "Ensuring build dependencies and headers are installed..."
@@ -249,80 +505,149 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
     esac
     bold_green "✅ Build tools and libraries verified"
 
+    if [[ ! -x "$PYTHON_BIN" ]]; then
+        die "Configured Python executable is not available: $PYTHON_BIN"
+    fi
+
+    PYTHON_PREFIX=$(env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
+        "$PYTHON_BIN" -c 'import sys; print(sys.prefix)') \
+        || die "Could not determine the configured Python prefix."
+
     # vim
     if ! vim_has_python_and_lua; then
         bold_yellow "Building Vim from source with +python3 and +lua support..."
-		git clone https://github.com/vim/vim.git /tmp/vim-src
-		cd /tmp/vim-src/src || exit 1
-		./configure \
+		rm -rf /tmp/vim-src
+        git clone https://github.com/vim/vim.git /tmp/vim-src \
+            || die "Failed to clone Vim source."
+        cd /tmp/vim-src/src || die "Could not enter Vim source directory."
+        env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
+        ./configure \
 			--with-features=huge \
 			--enable-fail-if-missing \
 			--enable-multibyte \
 			--enable-python3interp=yes \
+            --with-python3-command="$PYTHON_BIN" \
 			--enable-luainterp=yes \
 			--with-luajit \
-			--prefix=/usr/local
-		make -s
-		make -s install
+			--prefix=/usr/local \
+            || die "Vim configure step failed."
+		make -s -j"$(nproc)" || die "Vim build failed."
+        make -s install || die "Vim installation failed."
 		rm -rf /tmp/vim-src
 		cd "$INSTALL_HOME" || exit 1
 
 		# Point system alternatives and clear cache so /usr/local/bin/vim takes precedence
-        if command -v update-alternatives &>/dev/null; then
-            update-alternatives --install /usr/bin/vim vim /usr/local/bin/vim 100
-            update-alternatives --set vim /usr/local/bin/vim
+        if command -v update-alternatives >/dev/null 2>&1; then
+            update-alternatives --install /usr/bin/vim vim /usr/local/bin/vim 100 \
+                || die "Could not register the Vim alternative."
+
+            update-alternatives --set vim /usr/local/bin/vim \
+                || die "Could not select the new Vim alternative."
         fi
         hash -r 2>/dev/null
+
+        if ! vim_has_python_and_lua; then
+            die "The newly built Vim failed the Python/Lua runtime check."
+        fi
 
 		bold_green "✅ vim installed with +python3 and +lua"
     fi
 
-    # curl
-    ! cmd_exist "curl" && pkg_install curl
-    ! cmd_exist "tmux" && pkg_install tmux
-    ! cmd_exist "unzip" && pkg_install unzip
+    # tools
+    cmd_exists curl || pkg_install curl
+    cmd_exists "tmux" || pkg_install tmux
+    cmd_exists "unzip" || pkg_install unzip
+    cmd_exists node || pkg_install nodejs
+    cmd_exists npm || pkg_install npm
 
     # vim-plug
     plug_file="$INSTALL_HOME/.vim/autoload/plug.vim"
     if [ ! -f "$plug_file" ]; then
         bold_yellow "Installing vim-plug..."
-        sudo -u "$SUDO_USER" curl -fLo "$plug_file" --create-dirs \
-            https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-                    bold_green "✅ vim-plug installed"
+        sudo -u "$SUDO_USER" -H mkdir -p "$INSTALL_HOME/.vim/autoload" \
+            || die "Could not create Vim autoload directory."
+
+        sudo -u "$SUDO_USER" -H curl -fL --retry 3 \
+            -o "$plug_file" \
+            https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim \
+            || die "Failed to download vim-plug."
+        bold_green "✅ vim-plug installed"
     fi
 
     bold_yellow "Installing Vim plugins via vim-plug..."
-    sudo -u "$SUDO_USER" vim -es -u "$INSTALL_HOME/.vimrc" -i NONE -c "PlugInstall --sync" -c "qa"
+    sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH vim -N -n \
+        -es \
+        -u "$INSTALL_HOME/.vimrc" \
+        -i NONE \
+        -c 'PlugInstall --sync' \
+        -c 'qa!' \
+        || die "Vim plugin installation failed."
     bold_green "✅ vim plugins installed"
 
     # powerline in dedicated virtualenv
     venvpath="$INSTALL_HOME/.local/share/powerline-venv"
+    install -d -o "$SUDO_USER" -g "$INSTALL_GROUP" \
+    "$INSTALL_HOME/.local/bin" \
+    "$INSTALL_HOME/.local/share" \
+    "$INSTALL_HOME/.local/share/fonts" \
+    "$INSTALL_HOME/.config/fontconfig/conf.d" \
+        || die "Could not create required Powerline directories."
 
-    if [ ! -d "$venvpath" ]; then
+    if [[ ! -x "$venvpath/bin/python" || ! -x "$venvpath/bin/pip" ]] \
+        || ! env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH "$venvpath/bin/python" -c \
+            'import sys; raise SystemExit(sys.base_prefix != sys.argv[1])' \
+            "$PYTHON_PREFIX"; then
         bold_yellow "Installing Powerline and dependencies..."
+
+        rm -rf -- "$venvpath"
+
         case "$DISTRO_FAMILY" in
             debian) pkg_install python3-full python3-pip fontconfig ;;
             arch)   pkg_install python python-pip fontconfig ;;
             fedora) pkg_install python3-pip fontconfig ;;
         esac
 
-        sudo -u "$SUDO_USER" python3 -m venv "$venvpath"
+        sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
+            "$PYTHON_BIN" -m venv "$venvpath" \
+            || die "Could not create the Powerline virtual environment."
 
-        sudo -u "$SUDO_USER" "$venvpath/bin/pip" install --upgrade pip -q
-        sudo -u "$SUDO_USER" "$venvpath/bin/pip" install powerline-status -q
+        sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
+            "$venvpath/bin/pip" install --upgrade pip -q \
+            || die "Could not upgrade pip in the Powerline virtual environment."
 
-        mkdir -p "$INSTALL_HOME/.local/bin"
-        ln -sf "$venvpath/bin/powerline" "$INSTALL_HOME/.local/bin/powerline"
-        chown -h "$SUDO_USER:$SUDO_USER" "$INSTALL_HOME/.local/bin/powerline"
+        sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
+            "$venvpath/bin/pip" install powerline-status -q \
+            || die "Could not install powerline-status."
 
-        mkdir -p "$INSTALL_HOME/.local/share/fonts" "$INSTALL_HOME/.config/fontconfig/conf.d"
-        wget -qO "$INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf" https://github.com/powerline/powerline/raw/develop/font/PowerlineSymbols.otf
-        wget -qO "$INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf" https://github.com/powerline/powerline/raw/develop/font/10-powerline-symbols.conf
+        ln -sfn "$venvpath/bin/powerline" "$INSTALL_HOME/.local/bin/powerline" \
+            || die "Could not create Powerline executable symlink."
 
-        chmod 644 "$INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf"
-        chmod 644 "$INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf"
-        chown -R "$SUDO_USER:$SUDO_USER" "$INSTALL_HOME/.local/share/fonts" "$INSTALL_HOME/.config/fontconfig"
-        fc-cache -vf "$INSTALL_HOME/.local/share/fonts/" >/dev/null
+        chown -h "$SUDO_USER:$INSTALL_GROUP" "$INSTALL_HOME/.local/bin/powerline" \
+            || die "Could not set ownership on Powerline executable symlink."
+
+        sudo -u "$SUDO_USER" -H curl -fL --retry 3 \
+            -o "$INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf" \
+            https://github.com/powerline/powerline/raw/develop/font/PowerlineSymbols.otf \
+            || die "Failed to download PowerlineSymbols.otf."
+
+        sudo -u "$SUDO_USER" -H curl -fL --retry 3 \
+            -o "$INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf" \
+            https://github.com/powerline/powerline/raw/develop/font/10-powerline-symbols.conf \
+            || die "Failed to download Powerline fontconfig configuration."
+
+        chmod 644 \
+            "$INSTALL_HOME/.local/share/fonts/PowerlineSymbols.otf" \
+            "$INSTALL_HOME/.config/fontconfig/conf.d/10-powerline-symbols.conf" \
+            || die "Could not set Powerline file permissions."
+
+        chown -R "$SUDO_USER:$INSTALL_GROUP" \
+            "$INSTALL_HOME/.local/share/fonts" \
+            "$INSTALL_HOME/.config/fontconfig" \
+            || die "Could not set ownership on Powerline files."
+
+        sudo -u "$SUDO_USER" -H fc-cache -f "$INSTALL_HOME/.local/share/fonts/" \
+            >/dev/null \
+            || die "Font cache refresh failed."
 
         bold_green "✅ Powerline installed in virtualenv"
     else
@@ -330,26 +655,31 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
     fi
 
     # omp
-    if ! cmd_exist "oh-my-posh"; then
-        curl -s https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin
-        oh-my-posh font install literationmono
-        echo 'eval "$(oh-my-posh init bash --config ~/ethch.omp.toml)"' >> $INSTALL_HOME/.bashrc
-        default_echo "Oh-my-posh bashrc added"
-        bold_green "✅ oh-my-posh installed"
+    if ! cmd_exists "oh-my-posh"; then
+        curl -fsSL https://ohmyposh.dev/install.sh \
+            | bash -s -- -d /usr/local/bin \
+            || die "Oh My Posh installation failed."
+
+        bold_green "✅ Oh My Posh installed"
     fi
+
+    sudo -u "$SUDO_USER" -H oh-my-posh font install literationmono \
+        || bold_yellow "⚠️  Could not install the Oh My Posh font automatically."
+
+    # shellcheck disable=SC2016
+    # $HOME and command substitution must be evaluated in the user's future shell.
+    append_once \
+        'eval "$(oh-my-posh init bash --config "$HOME/ethch.omp.toml")"' \
+        "$INSTALL_HOME/.bashrc"
 
     if (( laptop )); then
         # TLP
-        ! cmd_exist "tlp-stat" && pkg_install tlp
-        bold_green "✅ tlp installed"
+        cmd_exists "tlp-stat" || pkg_install tlp
 
         # Wayland utilities
-        ! cmd_exist "sway" && pkg_install sway
-        bold_green "✅ sway installed"
-        ! cmd_exist "waybar" && pkg_install waybar
-        bold_green "✅ waybar installed"
-        ! cmd_exist "fuzzel" && pkg_install fuzzel
-        bold_green "✅ fuzzel installed"
+        cmd_exists "sway" || pkg_install sway
+        cmd_exists "waybar" || pkg_install waybar
+        cmd_exists "fuzzel" ||  pkg_install fuzzel
         
         case "$DISTRO_FAMILY" in
             debian) pkg_install greetd tuigreet ;;
@@ -367,7 +697,7 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
 
         if ! grep -q "GenuineIntel" /proc/cpuinfo; then
             bold_yellow "⚠️  Skipping throttled: Not an Intel CPU"
-        elif [[ ! -d $thrd_dir ]]; then
+        elif [[ ! -d "$thrd_dir" ]]; then
             bold_yellow "Installing throttled dependencies..."
             case "$DISTRO_FAMILY" in
                 debian)
@@ -386,9 +716,11 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
                     ;;
             esac
 
-            git clone https://github.com/erpalma/throttled.git /tmp/throttled-src
-            cd /tmp/throttled-src || exit 1
-            ./install.sh
+            rm -rf /tmp/throttled-src
+            git clone https://github.com/erpalma/throttled.git /tmp/throttled-src \
+                || die "Failed to clone throttled source."
+            cd /tmp/throttled-src || die "Could not enter throttled source directory."
+            ./install.sh || die "Throttled installer failed."
             rm -rf /tmp/throttled-src
             cd "$INSTALL_HOME" || exit 1
 
@@ -400,7 +732,7 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
             fi
 
             # Wrapper for CLI execution inside the venv
-            if [[ ! -f $thrd_wrap ]]; then
+            if [[ ! -f "$thrd_wrap" ]]; then
                 cat > "$thrd_wrap" << 'EOF'
 #!/bin/bash
 exec "/opt/throttled/venv/bin/python" "/opt/throttled/throttled.py" "$@"
@@ -408,8 +740,17 @@ EOF
                 chmod +x "$thrd_wrap"
             fi
 
-            if [[ ! -L $thrd_sym ]]; then
-                ln -sf "$thrd_wrap" "$thrd_sym"
+            if [[ -L "$thrd_sym" ]]; then
+                if [[ "$(readlink -f -- "$thrd_sym")" == "$(readlink -f -- "$thrd_wrap")" ]]; then
+                    bold_green "✅ throttled user symlink is already correct"
+                else
+                    die "CONFLICT: $thrd_sym is a symlink to a different target"
+                fi
+            elif [[ -e "$thrd_sym" ]]; then
+                die "CONFLICT: Existing non-symlink path at $thrd_sym"
+            else
+                ln -s -- "$thrd_wrap" "$thrd_sym" \
+                    || die "Could not create throttled user symlink."
             fi
 
             bold_green "✅ throttled installed and service started"
@@ -423,5 +764,5 @@ else
 fi
 
 # new shell (refresh) LAST AS ANYTHING AFTER WILL NOT RUN
-cd $INSTALL_HOME || exit 1
-bold_yellow "Refresh bash: exec bash or source ~/.bashrc"
+cd "$INSTALL_HOME" || exit 1
+bold_yellow "Apply the updated shell configuration with: source ~/.bashrc"

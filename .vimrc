@@ -1,5 +1,6 @@
+set nocompatible
 " line numbers
-set nu
+set number
 set relativenumber
 
 " filetype
@@ -76,11 +77,6 @@ if empty(glob('~/.vim/autoload/plug.vim'))
     \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
 endif
 
-" Run PlugInstall if there are missing plugins
-autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
-  \| PlugInstall --sync | source $MYVIMRC
-\| endif
-
 " ALE configs
 let g:ale_linters = {'rust': ['analyzer', 'cargo'], 'python': ['ruff']}
 let g:ale_fixers = {'rust': ['rustfmt'], 'python': ['ruff', 'black']}
@@ -148,7 +144,7 @@ call plug#begin()
 Plug 'andymass/vim-matchup'
 Plug 'dense-analysis/ale'
 Plug 'prettier/vim-prettier', {
-    \ 'do': 'yarn install --frozen-lockfile --production',
+    \ 'do': 'npm install --omit=dev',
     \ 'for': ['javascript', 'typescript', 'css', 'less', 'scss', 'json', 'graphql', 'markdown', 'vue', 'svelte', 'yaml', 'html'] }
 Plug 'scrooloose/nerdtree'
 Plug 'cocopon/iceberg.vim'
@@ -167,24 +163,54 @@ au FocusGained,BufEnter * silent! checktime
 
 " Powerline statusline
 " for vim binding, it must be installed as a library not binary
-let s:site_packages = glob(expand('~/.local/share/powerline-venv/lib/python3.*/site-packages'), 1)
+let g:enable_powerline_vim = get(g:, 'enable_powerline_vim', 1)
 
-if !empty(s:site_packages) && isdirectory(s:site_packages)
-    let s:powerline_vim = s:site_packages . '/powerline/bindings/vim'
-    if isdirectory(s:powerline_vim)
-        let &runtimepath .= ',' . s:powerline_vim
+if g:enable_powerline_vim
+    let $PYTHONHOME = ''
+    let $PYTHONPATH = ''
+
+    let s:powerline_site_packages = glob(
+                \ expand('~/.local/share/powerline-venv/lib/python3.*/site-packages'),
+                \ 1)
+    let s:powerline_python = expand('~/.local/share/powerline-venv/bin/python')
+    let s:powerline_python_prefix = ''
+
+    if executable(s:powerline_python)
+        let s:powerline_python_prefix = substitute(
+                    \ system(shellescape(s:powerline_python)
+                    \ . ' -c '
+                    \ . shellescape('import sys; print(sys.base_prefix)')),
+                    \ '\n\+$', '', '')
+    endif
+
+    if !empty(s:powerline_python_prefix)
+        let $PYTHONHOME = s:powerline_python_prefix
     endif
 
     if has('python3')
-        python3 << EOF
-import sys, vim
-site_packages = vim.eval('s:site_packages')
-if site_packages and site_packages not in sys.path:
-    sys.path.insert(0, site_packages)
-EOF
+                \ && !empty(s:powerline_site_packages)
+                \ && filereadable(s:powerline_site_packages . '/powerline/__init__.py')
+                \ && !empty(s:powerline_python_prefix)
+
+        python3 import sys
+
+        if py3eval('sys.prefix') ==# s:powerline_python_prefix
+            execute 'python3 import sys; sys.path.insert(0, '
+                        \ . string(s:powerline_site_packages) . ')'
+
+            python3 from powerline.vim import setup as powerline_setup
+            python3 powerline_setup()
+            python3 del powerline_setup
+        else
+            echohl WarningMsg
+            echomsg 'Powerline disabled: Vim Python does not match the Powerline virtualenv.'
+            echohl None
+        endif
     endif
 endif
 
 " theme
 set background=dark
-colorscheme iceberg
+if !empty(globpath(&runtimepath, 'colors/iceberg.vim'))
+    colorscheme iceberg
+endif
