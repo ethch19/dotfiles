@@ -376,10 +376,10 @@ if confirm "Install and configure the custom MOTD banner?"; then
                  2>/dev/null || true
     fi
 
-    # CF-DDNS log file
-    touch /var/log/cf-ddns.log 2>/dev/null || true
-    chown "$SUDO_USER:$INSTALL_GROUP" /var/log/cf-ddns.log 2>/dev/null || true
-    chmod 644 /var/log/cf-ddns.log 2>/dev/null || true
+    # FQDN sync log file
+    touch /var/log/fqdn-sync.log 2>/dev/null || true
+    chown "$SUDO_USER:$INSTALL_GROUP" /var/log/fqdn-sync.log 2>/dev/null || true
+    chmod 644 /var/log/fqdn-sync.log 2>/dev/null || true
 
     bold_green "✅ MOTD installed and configured"
 else

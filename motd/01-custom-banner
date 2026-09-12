@@ -109,27 +109,27 @@ fi
 IPV6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6 / {print $2}' | cut -d/ -f1 | head -n1)
 [ -z "$IPV6" ] && IPV6="None / Disabled"
 
-# DDNS Log Parsing + System Timezone
-DDNS_LOG="/var/log/cf-ddns.log"
+# FQDN Sync Log Parsing + System Timezone
+FQDN_LOG="/var/log/fqdn-sync.log"
 TZ_NAME=$(date +"%Z")
 
-if [ -r "$DDNS_LOG" ] && [ -s "$DDNS_LOG" ]; then
-    LAST_ENTRY=$(tail -n1 "$DDNS_LOG")
-    SYNC_TIME=$(echo "$LAST_ENTRY" | awk '{print $1, $2}')
-    SYNC_STATUS=$(echo "$LAST_ENTRY" | awk -F' - ' '{print $NF}' | tr -d '\r\n')
-    
-    if [ "$SYNC_STATUS" = "SUCCESS" ]; then
-        DDNS_DISPLAY="${SYNC_TIME} ${TZ_NAME} (${GREEN}${SYNC_STATUS}${RESET})"
+if [ -r "$FQDN_LOG" ] && [ -s "$FQDN_LOG" ]; then
+    LAST_ENTRY=$(tail -n1 "$FQDN_LOG")
+    SYNC_TIME=$(printf '%s\n' "$LAST_ENTRY" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+    [ -z "$SYNC_TIME" ] && SYNC_TIME="Unknown time"
+
+    if printf '%s\n' "$LAST_ENTRY" | grep -Fq 'Successfully synced FQDN:'; then
+        FQDN_DISPLAY="${SYNC_TIME} ${TZ_NAME} (${GREEN}SUCCESS${RESET})"
     else
-        DDNS_DISPLAY="${SYNC_TIME} ${TZ_NAME} (${RED}${SYNC_STATUS}${RESET})"
+        FQDN_DISPLAY="${SYNC_TIME} ${TZ_NAME} (${RED}FAILED${RESET})"
     fi
 else
-    DDNS_DISPLAY="${GRAY}No sync logs found in /var/log/cf-ddns.log${RESET}"
+    FQDN_DISPLAY="${GRAY}No sync logs found in /var/log/fqdn-sync.log${RESET}"
 fi
 
 printf "  ${GREEN}%-14s${RESET} %s\n" "Local IPv4:" "$IPV4"
 printf "  ${GREEN}%-14s${RESET} %s\n" "Local IPv6:" "$IPV6"
-printf "  ${YELLOW}%-14s${RESET} %b\n" "DDNS Sync:"  "$DDNS_DISPLAY"
+printf "  ${YELLOW}%-14s${RESET} %b\n" "FQDN Sync:"  "$FQDN_DISPLAY"
 
 # --- Color Swatches ---
 echo ""
