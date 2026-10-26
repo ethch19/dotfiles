@@ -1,0 +1,11 @@
+services:
+  webdav:
+    image: ghcr.io/hacdias/webdav:latest
+    container_name: webdav
+    restart: unless-stopped
+    ports:
+      - '6065:6065' 
+    volumes:
+      - /mnt/unraid/webdav-data:/data
+      - ./config.yml:/config.yml:ro
+    command: -c /config.yml

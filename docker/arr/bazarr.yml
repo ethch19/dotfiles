@@ -1,0 +1,17 @@
+services:
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config/bazarr:/config
+      - ${MEDIA_DATA}:/data
+    ports:
+      - "6767:6767"
+    networks:
+      - servarrnetwork

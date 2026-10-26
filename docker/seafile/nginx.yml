@@ -1,0 +1,38 @@
+services:
+  nginx:
+    image: nginx:latest
+    container_name: seafile-nginx
+    ports:
+      - "8080:80"
+    volumes:
+      #- certbot_etc:/etc/letsencrypt:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - /root/docker/seafile-nginx/logs:/var/log/nginx
+      #- ./ssl-dhparams.pem:/ssl-dhparams.pem
+    depends_on:
+      seafile:
+        condition: service_started
+    # certbot:
+    #  condition: service_started
+    networks:
+      - seafile-net
+    restart: unless-stopped
+
+      #certbot:
+      #image: certbot/dns-cloudflare
+      #container_name: seafile-certbot
+      # volumes:
+      #- certbot_etc:/etc/letsencrypt
+      #- ./cloudflare.ini:/root/cloudflare.ini
+      #- ./certbot-manager.sh:/certbot-manager.sh:ro
+      #entrypoint: ["/bin/sh", "/certbot-manager.sh"]
+      #restart: unless-stopped
+
+
+networks:
+  seafile-net:
+    name: seafile-net
+
+      #volumes:
+      #certbot_etc:
+      #name: certbot_etc

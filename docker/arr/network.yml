@@ -1,0 +1,4 @@
+networks:
+  servarrnetwork:
+    name: servarrnetwork
+    driver: bridge
