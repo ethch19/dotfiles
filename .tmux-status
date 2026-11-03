@@ -1,0 +1,87 @@
+#!/bin/sh
+# Data source for the tmux status bar: tmux can render text but cannot work out
+# rates, so the /proc sampling and the delta against the previous refresh live here.
+#   ~/.tmux-status cpu   -> 7%
+#   ~/.tmux-status net   -> ↓1.2M ↑40K
+#   ~/.tmux-status test  -> self-check
+
+state="${XDG_RUNTIME_DIR:-/tmp}/tmux-status.$(id -u)"
+
+# bytes/second -> 1.2M, 400K, 12B
+human() {
+	awk -v b="$1" 'BEGIN {
+		if (b >= 1048576) printf "%.1fM", b / 1048576
+		else if (b >= 1024) printf "%.0fK", b / 1024
+		else printf "%.0fB", b
+	}'
+}
+
+case "$1" in
+cpu)
+	# jiffies busy (user+nice+system+irq+softirq) and total, straight from /proc/stat
+	# shellcheck disable=SC2046 # word splitting is how we fill u and t
+	set -- $(awk '/^cpu / { print $2 + $4, $2 + $3 + $4 + $5 + $6 + $7 + $8; exit }' /proc/stat)
+	u=${1:-0}
+	t=${2:-0}
+	# no previous sample yet: report 0%, not the average since boot
+	du=0 dt=1
+	if [ -r "$state.cpu" ]; then
+		read -r pu pt <"$state.cpu"
+		du=$((u - ${pu:-$u}))
+		dt=$((t - ${pt:-$t}))
+		[ "$du" -ge 0 ] || du=0
+		[ "$dt" -gt 0 ] || dt=1
+	fi
+	printf '%s %s\n' "$u" "$t" >"$state.cpu"
+	printf '%d%%\n' "$((du * 100 / dt))"
+	;;
+net)
+	iface=$(ip route show default 2>/dev/null | awk 'NR == 1 { print $5; exit }')
+	[ -n "$iface" ] || for f in /sys/class/net/*; do
+		[ "${f##*/}" = lo ] || {
+			iface=${f##*/}
+			break
+		}
+	done
+	# rx and tx bytes are the 1st and 9th counters after the interface name
+	# shellcheck disable=SC2046 # word splitting is how we fill rx and tx
+	set -- $(awk -v i="$iface" '$1 == i ":" { print $2, $10; exit }' /proc/net/dev)
+	rx=${1:-0}
+	tx=${2:-0}
+	now=$(date +%s)
+	# no previous sample yet: 0B/s, not a lifetime average
+	prx=$rx ptx=$tx dt=1
+	if [ -r "$state.net" ]; then
+		read -r a b c <"$state.net"
+		prx=${a:-$rx} ptx=${b:-$tx}
+		# shortcut: the clock has 1s resolution, so a sub-second gap is treated as 1s
+		dt=$((now - ${c:-$now}))
+		[ "$dt" -gt 0 ] || dt=1
+	fi
+	printf '%s %s %s\n' "$rx" "$tx" "$now" >"$state.net"
+	printf '↓%s ↑%s\n' "$(human $(( (rx - prx) / dt )))" "$(human $(( (tx - ptx) / dt )))"
+	;;
+test)
+	c=$("$0" cpu)
+	n=$("$0" net)
+	case "$c" in
+	[0-9]% | [1-9][0-9]% | 100%) ;;
+	*)
+		echo "FAIL cpu: '$c'" >&2
+		exit 1
+		;;
+	esac
+	case "$n" in
+	↓*↑*) ;;
+	*)
+		echo "FAIL net: '$n'" >&2
+		exit 1
+		;;
+	esac
+	echo "ok cpu=$c net=$n"
+	;;
+*)
+	echo "usage: $0 cpu|net|test" >&2
+	exit 2
+	;;
+esac

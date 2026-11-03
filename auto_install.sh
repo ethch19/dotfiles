@@ -231,7 +231,7 @@ default_echo "Number of dotfiles: $no_files"
 # base config 
 # shellcheck disable=SC2034
 # Accessed indirectly through objects[] and declare -n items.
-home=(".tmux.conf" ".vimrc" "ethch.omp.toml")
+home=(".tmux.conf" ".tmux-status" ".vimrc" "ethch.omp.toml")
 dotconfig=("powerline")
 etc=()
 greetd_config=()
