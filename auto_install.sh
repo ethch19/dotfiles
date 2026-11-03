@@ -231,8 +231,8 @@ default_echo "Number of dotfiles: $no_files"
 # base config 
 # shellcheck disable=SC2034
 # Accessed indirectly through objects[] and declare -n items.
-home=(".tmux.conf" ".tmux-status" ".vimrc" "ethch.omp.toml")
-dotconfig=("powerline")
+home=(".tmux.conf" ".tmux-status" ".tmux-workflow" ".vimrc" "ethch.omp.toml")
+dotconfig=("powerline" "yazi")
 etc=()
 greetd_config=()
 
@@ -557,6 +557,8 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
     cmd_exists curl || pkg_install curl
     cmd_exists "tmux" || pkg_install tmux
     cmd_exists "unzip" || pkg_install unzip
+    # tmux-yank shells out to wl-copy (Wayland) or xclip to reach the clipboard
+    cmd_exists "wl-copy" || pkg_install wl-clipboard
     cmd_exists node || pkg_install nodejs
     cmd_exists npm || pkg_install npm
 
@@ -577,6 +579,35 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
     sudo -u "$SUDO_USER" -H "$tpm_dir/bin/install_plugins" \
         || die "tmux plugin installation failed."
     bold_green "✅ tmux plugins installed"
+
+    # yazi: the file tree pane of the tmux-workflow layouts. Not in trixie, so
+    # take the upstream static build instead of a distro package.
+    if ! cmd_exists "yazi"; then
+        case "$(uname -m)" in
+            x86_64 | amd64) yazi_arch="x86_64" ;;
+            aarch64 | arm64) yazi_arch="aarch64" ;;
+            *) die "No yazi release build for $(uname -m)." ;;
+        esac
+
+        bold_yellow "Installing yazi..."
+        yazi_dir="yazi-$yazi_arch-unknown-linux-musl"
+        yazi_tmp="$(mktemp -d)"
+
+        curl -fL --retry 3 -o "$yazi_tmp/$yazi_dir.zip" \
+            "https://github.com/sxyazi/yazi/releases/latest/download/$yazi_dir.zip" \
+            || die "Failed to download yazi."
+        unzip -q -o "$yazi_tmp/$yazi_dir.zip" -d "$yazi_tmp" \
+            || die "Failed to unpack yazi."
+
+        for bin_name in yazi ya; do
+            install -m 755 "$yazi_tmp/$yazi_dir/$bin_name" "/usr/local/bin/$bin_name" \
+                || die "Could not install $bin_name."
+        done
+        rm -rf "$yazi_tmp"
+
+        cmd_exists "yazi" || die "yazi is not on PATH after installation."
+        bold_green "✅ yazi installed"
+    fi
 
     # vim-plug
     plug_file="$INSTALL_HOME/.vim/autoload/plug.vim"

@@ -1,0 +1,77 @@
+#!/bin/sh
+# Window layouts for the prefix+c menu, so a new window starts shaped instead of
+# being rearranged by hand:
+#   ~/.tmux-workflow coding   -> yazi 10% | $EDITOR 80% | shell 10%
+#   ~/.tmux-workflow stacked  -> $EDITOR 80% of the height, yazi | shell below
+#   ~/.tmux-workflow test     -> build both in a throwaway server and check them
+# split-window sizes a percentage of the pane being split, not of the window, so
+# the strips are worked out in cells: 10% of the window stays 10% of the window.
+# Every command carries an explicit -t: the implicit "current window" is whatever
+# the session last showed, which is not this pane as soon as another window opens
+# while this script is starting up.
+set -eu
+
+editor=${VISUAL:-${EDITOR:-vim}}
+shell=${SHELL:-/bin/sh}
+action=${1:-}
+
+case "$action" in
+coding | stacked) ;;
+test)
+	# Needs yazi, vim and bash installed: the layouts spawn them for real.
+	tmp="tmux-workflow-test.$$"
+	rc=0
+	tmux -L "$tmp" new-session -d -x 200 -y 50 -s s
+	tmux -L "$tmp" new-window -n coding "$0 coding"
+	tmux -L "$tmp" new-window -n stack "$0 stacked"
+	# vim and yazi take a moment to spawn, so wait for the panes instead of racing
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ "$(tmux -L "$tmp" list-panes -t s:coding | wc -l)" -eq 3 ] &&
+			[ "$(tmux -L "$tmp" list-panes -t s:stack | wc -l)" -eq 3 ] && break
+		sleep 0.2
+	done
+	widths=$(tmux -L "$tmp" list-panes -t s:coding -F '#{pane_width}' | paste -sd,)
+	heights=$(tmux -L "$tmp" list-panes -t s:stack -F '#{pane_height}' | paste -sd,)
+	case "$widths" in
+	20,158,20) echo "ok   coding widths   $widths" ;;
+	*) echo "FAIL coding widths   $widths, want 20,158,20" >&2 && rc=1 ;;
+	esac
+	case "$heights" in
+	39,10,10) echo "ok   stacked heights $heights" ;;
+	*) echo "FAIL stacked heights $heights, want 39,10,10" >&2 && rc=1 ;;
+	esac
+	tmux -L "$tmp" kill-server
+	exit "$rc"
+	;;
+*)
+	echo "usage: ${0##*/} coding|stacked|test" >&2
+	exit 2
+	;;
+esac
+
+self=${TMUX_PANE:?not running inside tmux}
+win_width=$(tmux display -p -t "$self" '#{window_width}')
+win_height=$(tmux display -p -t "$self" '#{window_height}')
+strip=$((win_width / 10))
+band=$((win_height * 20 / 100))
+[ "$strip" -ge 2 ] || strip=2
+[ "$band" -ge 2 ] || band=2
+
+# -c "$PWD" opens every pane in the directory the window was created from
+case "$action" in
+coding)
+	# -b puts the tree strip left of this pane, which leaves this one in the middle
+	tmux split-window -h -b -l "$strip" -t "$self" -c "$PWD" yazi || exit 1
+	tmux split-window -h -l "$strip" -t "$self" -c "$PWD" "$shell" || exit 1
+	tmux select-pane -t "$self"
+	exec "$editor"
+	;;
+stacked)
+	# the bottom band is created as the tree pane and then halved: the pane from
+	# a plain -h split is always the right-hand one
+	bot=$(tmux split-window -v -l "$band" -P -F '#{pane_id}' -t "$self" -c "$PWD" yazi) || exit 1
+	tmux split-window -h -t "$bot" -c "$PWD" "$shell" || exit 1
+	tmux select-pane -t "$self"
+	exec "$editor"
+	;;
+esac

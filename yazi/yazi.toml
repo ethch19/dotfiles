@@ -1,0 +1,7 @@
+# yazi lives in the 10%-wide strip of the tmux-workflow coding layout, which is
+# ~20 cells. The default three columns (parent | current | preview) get squashed
+# into ~6 cells each and every name comes out ellipsised, so keep one column and
+# give it the whole width. Dotfiles are what this tree is usually for: show them.
+[mgr]
+ratio = [0, 1, 0]
+show_hidden = true
