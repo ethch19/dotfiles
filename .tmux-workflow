@@ -63,15 +63,16 @@ test)
 	done
 	editor_pane=$(tmux -L "$tmp" list-panes -t s:edit -F '#{pane_id} #{pane_width}' | sort -k2 -n | tail -1 | cut -d' ' -f1)
 	shell_pane=$(tmux -L "$tmp" list-panes -t s:edit -F '#{pane_id} #{pane_width}' | sort -k2 -n | sed -n 2p | cut -d' ' -f1)
-	# wait for the editor itself: sending the path to a shell that has not exec'd
-	# it yet would take the fallback branch and hide an escaping bug
+	# wait for the editor itself: sending the path to a shell that has not started
+	# it yet would take the fallback branch and hide an escaping bug. The pane keeps
+	# a shell around, so ask the tty (pane_current_command is then just "sh").
+	tty=$(tmux -L "$tmp" display -p -t "$editor_pane" '#{pane_tty}')
+	on_tty() { pgrep -t "${tty#/dev/}" '^(vim|nvim|vi)' >/dev/null; }
 	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-		[ "$(tmux -L "$tmp" display -p -t "$editor_pane" '#{pane_current_command}')" = "${editor##*/}" ] && break
+		on_tty && break
 		sleep 0.2
 	done
-	if [ "$(tmux -L "$tmp" display -p -t "$editor_pane" '#{pane_current_command}')" != "${editor##*/}" ]; then
-		echo "FAIL the editor did not start in the big pane" >&2 && rc=1
-	fi
+	on_tty || { echo "FAIL the editor did not start in the big pane" >&2 && rc=1; }
 	tmux -L "$tmp" send-keys -t "$shell_pane" "$0 edit '$src/a b.txt'" Enter
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		tmux -L "$tmp" capture-pane -p -t "$editor_pane" | grep -q EDITOK && break
@@ -81,6 +82,32 @@ test)
 		echo "ok   edit action reaches the editor pane"
 	else
 		echo "FAIL edit action did not reach the editor pane" >&2 && rc=1
+	fi
+	# a modified buffer must not block the next file. This vimrc sets hidden, so :e
+	# would also pass here; :hide edit keeps it true for vimrcs that do not.
+	printf 'SECONDOK\n' >"$src/other.txt"
+	tmux -L "$tmp" send-keys -t "$editor_pane" i 'CHANGED' Escape
+	tmux -L "$tmp" send-keys -t "$shell_pane" "$0 edit '$src/other.txt'" Enter
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		tmux -L "$tmp" capture-pane -p -t "$editor_pane" | grep -q SECONDOK && break
+		sleep 0.2
+	done
+	if tmux -L "$tmp" capture-pane -p -t "$editor_pane" | grep -q SECONDOK; then
+		echo "ok   a modified buffer still switches file"
+	else
+		echo "FAIL a modified buffer blocked :hide edit" >&2 && rc=1
+	fi
+	tmux -L "$tmp" send-keys -t "$editor_pane" ':qa!' Enter
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		on_tty || break
+		sleep 0.2
+	done
+	if on_tty; then
+		echo "FAIL the editor did not quit" >&2 && rc=1
+	elif [ "$(tmux -L "$tmp" list-panes -t s:edit | wc -l)" -eq 3 ]; then
+		echo "ok   quitting the editor keeps its pane open"
+	else
+		echo "FAIL quitting the editor closed its pane" >&2 && rc=1
 	fi
 	rm -rf "$src"
 	tmux -L "$tmp" kill-server
@@ -114,11 +141,16 @@ if [ "$action" = edit ]; then
 		echo "${0##*/}: no editor pane in this window" >&2
 		exit 1
 	fi
-	# an editor already running there gets :edit, otherwise the shell is asked
-	case $(tmux display -p -t "$target" '#{pane_current_command}') in
-	vim | nvim | vi) tmux send-keys -t "$target" -l ":e $vpath" && tmux send-keys -t "$target" Enter ;;
-	*) tmux send-keys -t "$target" -l "$editor \"$shpath\"" && tmux send-keys -t "$target" Enter ;;
-	esac
+	# an editor already running on that tty gets :hide edit, the shell that holds
+	# the pane open (before the editor starts, after it quits) gets a command.
+	# :hide edit instead of :e, so a buffer with unsaved changes stays in the
+	# buffer list (:b# gets back to it) instead of aborting with E37.
+	tty=$(tmux display -p -t "$target" '#{pane_tty}')
+	if [ -n "$tty" ] && pgrep -t "${tty#/dev/}" '^(vim|nvim|vi)' >/dev/null; then
+		tmux send-keys -t "$target" -l ":hide edit $vpath" && tmux send-keys -t "$target" Enter
+	else
+		tmux send-keys -t "$target" -l "$editor \"$shpath\"" && tmux send-keys -t "$target" Enter
+	fi
 	exit 0
 fi
 
@@ -134,6 +166,13 @@ band=$((win_height * 20 / 100))
 [ "$right" -ge 2 ] || right=2
 [ "$band" -ge 2 ] || band=2
 
+# the editor is not exec'd: when vim quits, the pane falls back to a shell
+# instead of vanishing, and yazi can hand it the next file again
+open_editor() {
+	"$editor" || :
+	exec "$shell"
+}
+
 # -c "$dir" opens every pane in the directory the window was created from
 case "$action" in
 coding)
@@ -141,7 +180,7 @@ coding)
 	tmux split-window -h -b -l "$strip" -t "$self" -c "$dir" yazi || exit 1
 	tmux split-window -h -l "$right" -t "$self" -c "$dir" "$shell" || exit 1
 	tmux select-pane -t "$self"
-	exec "$editor"
+	open_editor
 	;;
 stacked)
 	# the bottom band is created as the tree pane and then halved: the pane from
@@ -149,6 +188,6 @@ stacked)
 	bot=$(tmux split-window -v -l "$band" -P -F '#{pane_id}' -t "$self" -c "$dir" yazi) || exit 1
 	tmux split-window -h -t "$bot" -c "$dir" "$shell" || exit 1
 	tmux select-pane -t "$self"
-	exec "$editor"
+	open_editor
 	;;
 esac
