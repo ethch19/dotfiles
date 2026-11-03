@@ -5,3 +5,10 @@
 [mgr]
 ratio = [0, 1, 0]
 show_hidden = true
+
+# Enter on a file hands it to the editor pane of the tmux window instead of
+# spawning $EDITOR inside this 20-column strip.
+[opener]
+edit = [
+	{ run = '~/.tmux-workflow edit %s', desc = "edit in the tmux editor pane", for = "unix" },
+]

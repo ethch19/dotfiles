@@ -4,6 +4,8 @@
 #   ~/.tmux-workflow coding   -> yazi 10% | $EDITOR 75% | shell 15%
 #   ~/.tmux-workflow stacked  -> $EDITOR 80% of the height, yazi | shell below
 #   ~/.tmux-workflow test     -> build both in a throwaway server and check them
+#   ~/.tmux-workflow edit F   -> open F in this window's editor pane (yazi calls it)
+# `test` needs yazi, vim and bash installed: the layouts spawn them for real.
 # split-window sizes a percentage of the pane being split, not of the window, so
 # the strips are worked out in cells: 10% of the window stays 10% of the window.
 # Every command carries an explicit -t: the implicit "current window" is whatever
@@ -15,8 +17,12 @@ editor=${VISUAL:-${EDITOR:-vim}}
 shell=${SHELL:-/bin/sh}
 action=${1:-}
 
+# vim reads the rest of an :e line as the name (so spaces are fine), but it
+# expands % and # and splits on |, so those and the backslash itself get escaped
+escape_vim_path() { printf '%s' "$1" | sed 's/[\\ %#|]/\\&/g'; }
+
 case "$action" in
-coding | stacked) ;;
+coding | stacked | edit) ;;
 test)
 	# Needs yazi, vim and bash installed: the layouts spawn them for real.
 	tmp="tmux-workflow-test.$$"
@@ -40,16 +46,85 @@ test)
 	39,10,10) echo "ok   stacked heights $heights" ;;
 	*) echo "FAIL stacked heights $heights, want 39,10,10" >&2 && rc=1 ;;
 	esac
+
+	# the edit action: a name with a space has to survive vim's :e and land in
+	# the editor pane, not in the strip that called it
+	escaped=$(escape_vim_path '/a b/c#d|e.txt')
+	case "$escaped" in
+	'/a\ b/c\#d\|e.txt') echo "ok   edit path escaping  $escaped" ;;
+	*) echo "FAIL edit path escaping  $escaped" >&2 && rc=1 ;;
+	esac
+	src=$(mktemp -d)
+	printf 'EDITOK\n' >"$src/a b.txt"
+	tmux -L "$tmp" new-window -n edit -c "$src" "$0 coding"
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ "$(tmux -L "$tmp" list-panes -t s:edit | wc -l)" -eq 3 ] && break
+		sleep 0.2
+	done
+	editor_pane=$(tmux -L "$tmp" list-panes -t s:edit -F '#{pane_id} #{pane_width}' | sort -k2 -n | tail -1 | cut -d' ' -f1)
+	shell_pane=$(tmux -L "$tmp" list-panes -t s:edit -F '#{pane_id} #{pane_width}' | sort -k2 -n | sed -n 2p | cut -d' ' -f1)
+	# wait for the editor itself: sending the path to a shell that has not exec'd
+	# it yet would take the fallback branch and hide an escaping bug
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+		[ "$(tmux -L "$tmp" display -p -t "$editor_pane" '#{pane_current_command}')" = "${editor##*/}" ] && break
+		sleep 0.2
+	done
+	if [ "$(tmux -L "$tmp" display -p -t "$editor_pane" '#{pane_current_command}')" != "${editor##*/}" ]; then
+		echo "FAIL the editor did not start in the big pane" >&2 && rc=1
+	fi
+	tmux -L "$tmp" send-keys -t "$shell_pane" "$0 edit '$src/a b.txt'" Enter
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		tmux -L "$tmp" capture-pane -p -t "$editor_pane" | grep -q EDITOK && break
+		sleep 0.2
+	done
+	if tmux -L "$tmp" capture-pane -p -t "$editor_pane" | grep -q EDITOK; then
+		echo "ok   edit action reaches the editor pane"
+	else
+		echo "FAIL edit action did not reach the editor pane" >&2 && rc=1
+	fi
+	rm -rf "$src"
 	tmux -L "$tmp" kill-server
 	exit "$rc"
 	;;
 *)
-	echo "usage: ${0##*/} coding|stacked|test" >&2
+	echo "usage: ${0##*/} coding|stacked|test|edit FILE" >&2
 	exit 2
 	;;
 esac
 
+# the editor pane is the biggest one, which is the middle column of coding and
+# the top band of stacked; looking it up from $TMUX_PANE's window never depends
+# on which pane the client currently has focused
+if [ "$action" = edit ]; then
+	self=${TMUX_PANE:?not running inside tmux}
+	[ $# -ge 2 ] || { echo "usage: ${0##*/} edit FILE" >&2; exit 2; }
+	file=$(realpath -- "$2" 2>/dev/null || printf '%s' "$2")
+	if [ -d "$file" ]; then
+		# Enter on a directory: descend in yazi instead of handing a directory to
+		# the editor, which would load a file browser over the file being edited
+		tmux send-keys -t "$self" l
+		exit 0
+	fi
+	vpath=$(escape_vim_path "$file")
+	shpath=$(printf '%s' "$file" | sed 's/[\\"$`]/\\&/g')
+	target=$(tmux list-panes -t "$(tmux display -p -t "$self" '#{window_id}')" \
+		-F '#{pane_id} #{pane_width} #{pane_height}' |
+		awk 'NF == 3 && $2 * $3 > area { area = $2 * $3; id = $1 } END { print id }')
+	if [ -z "$target" ] || [ "$target" = "$self" ]; then
+		echo "${0##*/}: no editor pane in this window" >&2
+		exit 1
+	fi
+	# an editor already running there gets :edit, otherwise the shell is asked
+	case $(tmux display -p -t "$target" '#{pane_current_command}') in
+	vim | nvim | vi) tmux send-keys -t "$target" -l ":e $vpath" && tmux send-keys -t "$target" Enter ;;
+	*) tmux send-keys -t "$target" -l "$editor \"$shpath\"" && tmux send-keys -t "$target" Enter ;;
+	esac
+	exit 0
+fi
+
 self=${TMUX_PANE:?not running inside tmux}
+# $PWD is the tmux server's directory, not the window's, so ask tmux for it
+dir=$(tmux display -p -t "$self" '#{pane_current_path}')
 win_width=$(tmux display -p -t "$self" '#{window_width}')
 win_height=$(tmux display -p -t "$self" '#{window_height}')
 strip=$((win_width / 10))
@@ -59,20 +134,20 @@ band=$((win_height * 20 / 100))
 [ "$right" -ge 2 ] || right=2
 [ "$band" -ge 2 ] || band=2
 
-# -c "$PWD" opens every pane in the directory the window was created from
+# -c "$dir" opens every pane in the directory the window was created from
 case "$action" in
 coding)
 	# -b puts the tree strip left of this pane, which leaves this one in the middle
-	tmux split-window -h -b -l "$strip" -t "$self" -c "$PWD" yazi || exit 1
-	tmux split-window -h -l "$right" -t "$self" -c "$PWD" "$shell" || exit 1
+	tmux split-window -h -b -l "$strip" -t "$self" -c "$dir" yazi || exit 1
+	tmux split-window -h -l "$right" -t "$self" -c "$dir" "$shell" || exit 1
 	tmux select-pane -t "$self"
 	exec "$editor"
 	;;
 stacked)
 	# the bottom band is created as the tree pane and then halved: the pane from
 	# a plain -h split is always the right-hand one
-	bot=$(tmux split-window -v -l "$band" -P -F '#{pane_id}' -t "$self" -c "$PWD" yazi) || exit 1
-	tmux split-window -h -t "$bot" -c "$PWD" "$shell" || exit 1
+	bot=$(tmux split-window -v -l "$band" -P -F '#{pane_id}' -t "$self" -c "$dir" yazi) || exit 1
+	tmux split-window -h -t "$bot" -c "$dir" "$shell" || exit 1
 	tmux select-pane -t "$self"
 	exec "$editor"
 	;;
