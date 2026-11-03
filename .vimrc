@@ -1,4 +1,11 @@
 set nocompatible
+
+" Vim links the system libpython3.13, but its embedded interpreter resolves
+" `python3` from PATH and adopts conda's stdlib when conda is active. Mixing
+" conda's _ctypes.so with the system libpython segfaults on `import ctypes`,
+" which Powerline does at load time. Pin the stdlib to match the linkage.
+let $PYTHONHOME = '/usr'
+
 " line numbers
 set number
 set relativenumber

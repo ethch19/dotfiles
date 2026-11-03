@@ -589,15 +589,17 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
 
     apt-get install -y fontconfig python3-full -qq
 
-    if ! cmd_exist "uv"; then
+    # root's PATH lacks the user's ~/.local/bin, so check both before installing a duplicate
+    if ! cmd_exists "uv" && [ ! -x "$INSTALL_HOME/.local/bin/uv" ]; then
         bold_yellow "Installing uv..."
         curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
     fi
+    uv_bin=$(command -v uv || echo "$INSTALL_HOME/.local/bin/uv")
 
     if [ ! -d "$venvpath" ]; then
         bold_yellow "Creating venv"
-        sudo -u "$SUDO_USER" uv venv "$venvpath" --python 3.12
-        sudo -u "$SUDO_USER" uv pip install --python "$venvpath/bin/python" --upgrade powerline-status tmuxp -q
+        sudo -u "$SUDO_USER" "$uv_bin" venv "$venvpath" --python 3.12
+        sudo -u "$SUDO_USER" "$uv_bin" pip install --python "$venvpath/bin/python" --upgrade powerline-status tmuxp -q
         
         mkdir -p "$INSTALL_HOME/.local/bin"
         for bin_name in powerline powerline-config powerline-daemon tmuxp; do
@@ -606,14 +608,6 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
                 chown -h "$SUDO_USER:$SUDO_USER" "$INSTALL_HOME/.local/bin/$bin_name"
             fi
         done
-
-        sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
-            "$venvpath/bin/pip" install --upgrade pip -q \
-            || die "Could not upgrade pip in the Powerline virtual environment."
-
-        sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
-            "$venvpath/bin/pip" install powerline-status -q \
-            || die "Could not install powerline-status."
 
         ln -sfn "$venvpath/bin/powerline" "$INSTALL_HOME/.local/bin/powerline" \
             || die "Could not create Powerline executable symlink."
@@ -645,8 +639,8 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
             >/dev/null \
             || die "Font cache refresh failed."
 
-        cmd_exist "tmuxp"
-        cmd_exist "powerline"
+        cmd_exists "tmuxp"
+        cmd_exists "powerline"
 
         bold_green "✅ Venv installed"
     else
