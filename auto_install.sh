@@ -560,6 +560,24 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
     cmd_exists node || pkg_install nodejs
     cmd_exists npm || pkg_install npm
 
+    # tpm + the plugins .tmux.conf declares
+    tpm_dir="$INSTALL_HOME/.tmux/plugins/tpm"
+    if [ ! -d "$tpm_dir" ]; then
+        bold_yellow "Installing tpm..."
+        sudo -u "$SUDO_USER" -H mkdir -p "$INSTALL_HOME/.tmux/plugins" \
+            || die "Could not create the tmux plugins directory."
+
+        sudo -u "$SUDO_USER" -H git clone --depth 1 \
+            https://github.com/tmux-plugins/tpm "$tpm_dir" \
+            || die "Failed to clone tpm."
+        bold_green "✅ tpm installed"
+    fi
+
+    bold_yellow "Installing tmux plugins via tpm..."
+    sudo -u "$SUDO_USER" -H "$tpm_dir/bin/install_plugins" \
+        || die "tmux plugin installation failed."
+    bold_green "✅ tmux plugins installed"
+
     # vim-plug
     plug_file="$INSTALL_HOME/.vim/autoload/plug.vim"
     if [ ! -f "$plug_file" ]; then
