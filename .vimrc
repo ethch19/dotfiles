@@ -145,6 +145,26 @@ augroup END
 
 let g:lsp_diagnostics_enabled = 0
 
+" pyright starts from whatever python3 is first in PATH (miniforge3 here) and it
+" does not look for a .venv on its own, so imports from the project venv stay
+" unresolved. Hand it the nearest venv of the buffer being opened instead.
+" called both by vim-lsp-settings (name, key) and by vim-lsp (server_info)
+function! s:pyright_settings(...) abort
+    let l:analysis = {'useLibraryCodeForTypes': v:true}
+    let l:dir = expand('%:p:h')
+    while l:dir !=# '/'
+        for l:name in ['.venv', 'venv', 'env']
+            if executable(l:dir . '/' . l:name . '/bin/python')
+                return {'python': {'venvPath': l:dir, 'venv': l:name, 'analysis': l:analysis}}
+            endif
+        endfor
+        let l:dir = fnamemodify(l:dir, ':h')
+    endwhile
+    return {'python': {'analysis': l:analysis}}
+endfunction
+
+let g:lsp_settings = {'pyright-langserver': {'workspace_config': function('s:pyright_settings')}}
+
 " Plugins
 call plug#begin()
 
