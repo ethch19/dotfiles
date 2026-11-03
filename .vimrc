@@ -163,50 +163,36 @@ au FocusGained,BufEnter * silent! checktime
 
 " Powerline statusline
 " for vim binding, it must be installed as a library not binary
-let g:enable_powerline_vim = get(g:, 'enable_powerline_vim', 1)
+let s:candidates = glob(expand('~/.local/share/dotfiles-venv/lib/python3.*/site-packages'), 0, 1)
 
-if g:enable_powerline_vim
-    let $PYTHONHOME = ''
-    let $PYTHONPATH = ''
+if !empty(s:candidates)
+    let s:site_packages = s:candidates[0]
 
-    let s:powerline_site_packages = glob(
-                \ expand('~/.local/share/powerline-venv/lib/python3.*/site-packages'),
-                \ 1)
-    let s:powerline_python = expand('~/.local/share/powerline-venv/bin/python')
-    let s:powerline_python_prefix = ''
+    if isdirectory(s:site_packages)
+        " 1. Inject venv site-packages into Vim's Python sys.path first
+        if has('python3')
+            python3 << EOF
+import sys, vim
+site_packages = vim.eval('s:site_packages')
+if site_packages and site_packages not in sys.path:
+    sys.path.insert(0, site_packages)
+EOF
+        endif
 
-    if executable(s:powerline_python)
-        let s:powerline_python_prefix = substitute(
-                    \ system(shellescape(s:powerline_python)
-                    \ . ' -c '
-                    \ . shellescape('import sys; print(sys.base_prefix)')),
-                    \ '\n\+$', '', '')
-    endif
-
-    if !empty(s:powerline_python_prefix)
-        let $PYTHONHOME = s:powerline_python_prefix
-    endif
-
-    if has('python3')
-                \ && !empty(s:powerline_site_packages)
-                \ && filereadable(s:powerline_site_packages . '/powerline/__init__.py')
-                \ && !empty(s:powerline_python_prefix)
-
-        python3 import sys
-
-        if py3eval('sys.prefix') ==# s:powerline_python_prefix
-            execute 'python3 import sys; sys.path.insert(0, '
-                        \ . string(s:powerline_site_packages) . ')'
-
-            python3 from powerline.vim import setup as powerline_setup
-            python3 powerline_setup()
-            python3 del powerline_setup
-        else
-            echohl WarningMsg
-            echomsg 'Powerline disabled: Vim Python does not match the Powerline virtualenv.'
-            echohl None
+        " 2. Add Powerline's vim binding to runtimepath so Vim auto-loads the plugin
+        let s:powerline_vim = s:site_packages . '/powerline/bindings/vim'
+        if isdirectory(s:powerline_vim)
+            let &runtimepath .= ',' . fnameescape(s:powerline_vim)
         endif
     endif
+endif
+
+" wsl windows clipboard
+if system('uname -r') =~ "Microsoft"
+  augroup Yank
+    autocmd!
+    autocmd TextYankPost * :call system('/mnt/c/windows/system32/clip.exe ',@")
+  augroup END
 endif
 
 " theme

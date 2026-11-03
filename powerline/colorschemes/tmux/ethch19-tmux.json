@@ -1,0 +1,15 @@
+{
+  "name": "Colorscheme for tmux",
+  "groups": {
+    "session": { "fg": "white", "bg": "darkblue", "attrs": ["bold"] },
+    "session:prefix": { "fg": "white", "bg": "brightred", "attrs": ["bold"] },
+    "system_load": { "fg": "gray8", "bg": "gray2", "attrs": [] },
+    "cpu_load_percent": { "fg": "gray8", "bg": "gray2", "attrs": [] },
+    "network_load": { "fg": "gray8", "bg": "gray1", "attrs": [] },
+    "time": { "fg": "gray10", "bg": "gray4", "attrs": ["bold"] },
+    "date": { "fg": "gray9", "bg": "gray3", "attrs": [] },
+    "hostname": { "fg": "white", "bg": "gray2", "attrs": [] },
+    "window": { "fg": "gray7", "bg": "gray2", "attrs": [] },
+    "window:current": { "fg": "white", "bg": "darkblue", "attrs": ["bold"] }
+  }
+}

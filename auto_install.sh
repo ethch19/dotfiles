@@ -585,31 +585,27 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
     bold_green "✅ vim plugins installed"
 
     # powerline in dedicated virtualenv
-    venvpath="$INSTALL_HOME/.local/share/powerline-venv"
-    install -d -o "$SUDO_USER" -g "$INSTALL_GROUP" \
-    "$INSTALL_HOME/.local/bin" \
-    "$INSTALL_HOME/.local/share" \
-    "$INSTALL_HOME/.local/share/fonts" \
-    "$INSTALL_HOME/.config/fontconfig/conf.d" \
-        || die "Could not create required Powerline directories."
+    venvpath="$INSTALL_HOME/.local/share/dotfiles-venv"
 
-    if [[ ! -x "$venvpath/bin/python" || ! -x "$venvpath/bin/pip" ]] \
-        || ! env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH "$venvpath/bin/python" -c \
-            'import sys; raise SystemExit(sys.base_prefix != sys.argv[1])' \
-            "$PYTHON_PREFIX"; then
-        bold_yellow "Installing Powerline and dependencies..."
+    apt-get install -y fontconfig python3-full -qq
 
-        rm -rf -- "$venvpath"
+    if ! cmd_exist "uv"; then
+        bold_yellow "Installing uv..."
+        curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
+    fi
 
-        case "$DISTRO_FAMILY" in
-            debian) pkg_install python3-full python3-pip fontconfig ;;
-            arch)   pkg_install python python-pip fontconfig ;;
-            fedora) pkg_install python3-pip fontconfig ;;
-        esac
-
-        sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
-            "$PYTHON_BIN" -m venv "$venvpath" \
-            || die "Could not create the Powerline virtual environment."
+    if [ ! -d "$venvpath" ]; then
+        bold_yellow "Creating venv"
+        sudo -u "$SUDO_USER" uv venv "$venvpath" --python 3.12
+        sudo -u "$SUDO_USER" uv pip install --python "$venvpath/bin/python" --upgrade powerline-status tmuxp -q
+        
+        mkdir -p "$INSTALL_HOME/.local/bin"
+        for bin_name in powerline powerline-config powerline-daemon tmuxp; do
+            if [ -f "$venvpath/bin/$bin_name" ]; then
+                ln -sf "$venvpath/bin/$bin_name" "$INSTALL_HOME/.local/bin/$bin_name"
+                chown -h "$SUDO_USER:$SUDO_USER" "$INSTALL_HOME/.local/bin/$bin_name"
+            fi
+        done
 
         sudo -u "$SUDO_USER" -H env -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH \
             "$venvpath/bin/pip" install --upgrade pip -q \
@@ -649,9 +645,12 @@ if [[ "$DISTRO_FAMILY" != "unknown" ]]; then
             >/dev/null \
             || die "Font cache refresh failed."
 
-        bold_green "✅ Powerline installed in virtualenv"
+        cmd_exist "tmuxp"
+        cmd_exist "powerline"
+
+        bold_green "✅ Venv installed"
     else
-        bold_green "✅ Powerline virtualenv already exists"
+        bold_green "✅ Venv already exists"
     fi
 
     # omp

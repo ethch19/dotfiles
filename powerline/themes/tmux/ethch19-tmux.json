@@ -1,0 +1,63 @@
+{
+  "segments": {
+    "left": [
+      {
+        "function": "powerline.segments.tmux.session",
+        "priority": 10
+      },
+      {
+        "function": "powerline.segments.common.env.environment",
+        "priority": 50,
+        "args": {
+          "variable": "USER"
+        }
+      }
+    ],
+    "right": [
+      {
+        "function": "powerline.segments.common.sys.system_load",
+        "priority": 50,
+        "args": {
+          "format": "{avg:.1f}"
+        }
+      },
+      {
+        "function": "powerline.segments.common.sys.cpu_load_percent",
+        "priority": 40,
+        "args": {
+          "format": "{0}%"
+        }
+      },
+      {
+        "function": "powerline.segments.common.net.network_load",
+        "priority": 30,
+        "args": {
+          "interface": "eth0",
+          "recv_format": "↓ {value:>4}",
+          "sent_format": "↑ {value:>4}"
+        }
+      },
+      {
+        "function": "powerline.segments.common.time.date",
+        "name": "time",
+        "priority": 10,
+        "args": {
+          "format": "%H:%M",
+          "istime": true
+        }
+      },
+      {
+        "function": "powerline.segments.common.time.date",
+        "name": "date",
+        "priority": 20,
+        "args": {
+          "format": "%d-%b"
+        }
+      },
+      {
+        "function": "powerline.segments.common.net.hostname",
+        "priority": 10
+      }
+    ]
+  }
+}
