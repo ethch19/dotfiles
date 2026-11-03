@@ -1,7 +1,7 @@
 #!/bin/sh
 # Window layouts for the prefix+c menu, so a new window starts shaped instead of
 # being rearranged by hand:
-#   ~/.tmux-workflow coding   -> yazi 10% | $EDITOR 80% | shell 10%
+#   ~/.tmux-workflow coding   -> yazi 10% | $EDITOR 75% | shell 15%
 #   ~/.tmux-workflow stacked  -> $EDITOR 80% of the height, yazi | shell below
 #   ~/.tmux-workflow test     -> build both in a throwaway server and check them
 # split-window sizes a percentage of the pane being split, not of the window, so
@@ -33,8 +33,8 @@ test)
 	widths=$(tmux -L "$tmp" list-panes -t s:coding -F '#{pane_width}' | paste -sd,)
 	heights=$(tmux -L "$tmp" list-panes -t s:stack -F '#{pane_height}' | paste -sd,)
 	case "$widths" in
-	20,158,20) echo "ok   coding widths   $widths" ;;
-	*) echo "FAIL coding widths   $widths, want 20,158,20" >&2 && rc=1 ;;
+	20,148,30) echo "ok   coding widths   $widths" ;;
+	*) echo "FAIL coding widths   $widths, want 20,148,30" >&2 && rc=1 ;;
 	esac
 	case "$heights" in
 	39,10,10) echo "ok   stacked heights $heights" ;;
@@ -53,8 +53,10 @@ self=${TMUX_PANE:?not running inside tmux}
 win_width=$(tmux display -p -t "$self" '#{window_width}')
 win_height=$(tmux display -p -t "$self" '#{window_height}')
 strip=$((win_width / 10))
+right=$((win_width * 15 / 100))
 band=$((win_height * 20 / 100))
 [ "$strip" -ge 2 ] || strip=2
+[ "$right" -ge 2 ] || right=2
 [ "$band" -ge 2 ] || band=2
 
 # -c "$PWD" opens every pane in the directory the window was created from
@@ -62,7 +64,7 @@ case "$action" in
 coding)
 	# -b puts the tree strip left of this pane, which leaves this one in the middle
 	tmux split-window -h -b -l "$strip" -t "$self" -c "$PWD" yazi || exit 1
-	tmux split-window -h -l "$strip" -t "$self" -c "$PWD" "$shell" || exit 1
+	tmux split-window -h -l "$right" -t "$self" -c "$PWD" "$shell" || exit 1
 	tmux select-pane -t "$self"
 	exec "$editor"
 	;;
