@@ -2,7 +2,9 @@
   "segments": {
     "left": [
       {
-        "function": "powerline.segments.tmux.session",
+        "type": "string",
+        "name": "session",
+        "contents": "#S",
         "priority": 10
       },
       {

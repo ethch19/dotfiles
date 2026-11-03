@@ -1,15 +1,36 @@
 {
-  "name": "Colorscheme for tmux",
+  "name": "ethch19-tmux",
+  "parent": "default",
   "groups": {
-    "session": { "fg": "white", "bg": "darkblue", "attrs": ["bold"] },
-    "session:prefix": { "fg": "white", "bg": "brightred", "attrs": ["bold"] },
-    "system_load": { "fg": "gray8", "bg": "gray2", "attrs": [] },
-    "cpu_load_percent": { "fg": "gray8", "bg": "gray2", "attrs": [] },
-    "network_load": { "fg": "gray8", "bg": "gray1", "attrs": [] },
-    "time": { "fg": "gray10", "bg": "gray4", "attrs": ["bold"] },
-    "date": { "fg": "gray9", "bg": "gray3", "attrs": [] },
-    "hostname": { "fg": "white", "bg": "gray2", "attrs": [] },
-    "window": { "fg": "gray7", "bg": "gray2", "attrs": [] },
-    "window:current": { "fg": "white", "bg": "darkblue", "attrs": ["bold"] }
+    "background":                { "fg": "white", "bg": "gray1", "attrs": [] },
+    "background:divider":        { "fg": "gray6", "bg": "gray1", "attrs": [] },
+
+    "session":                   { "fg": "darkestgreen", "bg": "brightgreen", "attrs": ["bold"] },
+    "session:prefix":            { "fg": "white", "bg": "brightestred", "attrs": ["bold"] },
+
+    "active_window_status":      { "fg": "darkestgreen", "bg": "brightgreen", "attrs": ["bold"] },
+    "current_window_name":       { "fg": "darkestgreen", "bg": "brightgreen", "attrs": ["bold"] },
+    "window:current":            { "fg": "darkestgreen", "bg": "brightgreen", "attrs": ["bold"] },
+    "window_current:divider":    { "fg": "gray6", "bg": "brightgreen", "attrs": [] },
+
+    "window_status":             { "fg": "gray8", "bg": "gray2", "attrs": [] },
+    "window_name":               { "fg": "gray8", "bg": "gray2", "attrs": [] },
+    "window":                    { "fg": "gray8", "bg": "gray2", "attrs": [] },
+    "window:divider":            { "fg": "gray6", "bg": "gray2", "attrs": [] },
+
+    "activity_status":           { "fg": "brightyellow", "bg": "gray2", "attrs": [] },
+    "bell_status":               { "fg": "brightestred", "bg": "gray2", "attrs": ["bold"] },
+
+    "environment":               { "fg": "gray9", "bg": "gray2", "attrs": [] },
+    "system_load":               { "fg": "gray9", "bg": "gray2", "attrs": [] },
+    "cpu_load_percent":          { "fg": "gray9", "bg": "gray2", "attrs": [] },
+    "network_load":              { "fg": "gray9", "bg": "gray4", "attrs": [] },
+
+    "date":                      { "fg": "gray9", "bg": "gray4", "attrs": [] },
+    "time":                      { "fg": "gray1", "bg": "gray10", "attrs": ["bold"] },
+    "hostname":                  { "fg": "white", "bg": "gray2", "attrs": [] },
+
+    "attached_clients":          { "fg": "gray8", "bg": "gray2", "attrs": [] }
   }
 }
+
