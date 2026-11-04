@@ -237,7 +237,7 @@ etc=()
 greetd_config=()
 
 directory=("$INSTALL_HOME" "$INSTALL_HOME/.config")
-objects=("home[@]" "dotconfig[@]")
+objects=("home" "dotconfig")
 
 laptop=0
 if confirm "Install laptop configuration and apps (TLP, Throttled, Wayland)?"; then

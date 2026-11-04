@@ -1,10 +1,19 @@
 set nocompatible
 
-" Vim links the system libpython3.13, but its embedded interpreter resolves
-" `python3` from PATH and adopts conda's stdlib when conda is active. Mixing
-" conda's _ctypes.so with the system libpython segfaults on `import ctypes`,
+" Vim links the system libpython3.12, but its embedded interpreter resolves
+" `python3` from PATH and adopts conda's/venv's stdlib when one is active.
+" Mixing that stdlib with the system libpython segfaults on `import ctypes`,
 " which Powerline does at load time. Pin the stdlib to match the linkage.
 let $PYTHONHOME = '/usr'
+
+" ...but only for Vim's own interpreter: children inherit the environment, and
+" any venv python (pyright-langserver, black, ...) dies instantly under
+" PYTHONHOME=/usr with "Failed to import encodings module". Init the embedded
+" interpreter here, then drop the variable before anything can spawn a child.
+if has('python3')
+    py3 pass
+endif
+unlet $PYTHONHOME
 
 " line numbers
 set number
