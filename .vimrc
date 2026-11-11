@@ -1,5 +1,8 @@
 set nocompatible
 
+" leader before any mapping is defined: space is reachable with either thumb
+let mapleader = " "
+
 " Vim links the system libpython3.12, but its embedded interpreter resolves
 " `python3` from PATH and adopts conda's/venv's stdlib when one is active.
 " Mixing that stdlib with the system libpython segfaults on `import ctypes`,
@@ -44,6 +47,9 @@ set showcmd
 set noshowmode
 
 " status line
+" powerline's plugin sets &statusline at startup; keep the plain one as the
+" fallback only, so re-sourcing this file does not clobber it
+if !exists('g:powerline_loaded')
 set statusline=
 set statusline +=%5*%{&ff}%*            "file format
 set statusline +=%3*\ %{''.(&fenc!=''?&fenc:&enc).''}      "Encoding
@@ -54,6 +60,7 @@ set statusline +=%1*%=%5l%*             "current line
 set statusline +=%2*/%L%*               "total lines
 set statusline +=%1*%4v\ %*             "virtual column number
 set statusline +=%2*0x%04B\ %*          "character under cursor
+endif
 set laststatus=2 " Always display the status line
 
 " search patterns
@@ -85,6 +92,9 @@ set backupcopy=yes " prevent symlinkg from breaking when saving
 
 " maps
 nmap oo o<Esc>k
+" next/previous buffer; vim has no native ]b/[b, count works like 2]b
+nnoremap <silent> ]b :<C-u>execute 'bnext ' . v:count1<CR>
+nnoremap <silent> [b :<C-u>execute 'bprevious ' . v:count1<CR>
 
 " Vim-plug
 " Install vim-plug if not found
@@ -152,6 +162,20 @@ augroup lsp_install
     autocmd User lsp_buffer_enabled call s:on_lsp_buffer_enabled()
 augroup END
 
+" restart the LSP server of this buffer: picks up new deps, e.g. after `uv add`
+" (vim-lsp here has no :LspRestart - servers start on BufReadPost, so stop + :edit)
+function! s:lsp_restart() abort
+    if &modified
+        echohl WarningMsg
+        echomsg 'LSP restart reloads the buffer, save it first'
+        echohl None
+        return
+    endif
+    silent! LspStopServer
+    edit
+endfunction
+nnoremap <silent> <leader>lr :<C-u>call <SID>lsp_restart()<CR>
+
 let g:lsp_diagnostics_enabled = 0
 
 " pyright starts from whatever python3 is first in PATH (miniforge3 here) and it
@@ -217,19 +241,15 @@ EOF
 
         " 2. Add Powerline's vim binding to runtimepath so Vim auto-loads the plugin
         let s:powerline_vim = s:site_packages . '/powerline/bindings/vim'
-        if isdirectory(s:powerline_vim)
+        if isdirectory(s:powerline_vim) && stridx(&runtimepath, s:powerline_vim) < 0
             let &runtimepath .= ',' . fnameescape(s:powerline_vim)
         endif
     endif
 endif
 
-" wsl windows clipboard
-if system('uname -r') =~ "Microsoft"
-  augroup Yank
-    autocmd!
-    autocmd TextYankPost * :call system('/mnt/c/windows/system32/clip.exe ',@")
-  augroup END
-endif
+" wsl clipboard: WSLg already bridges the X11 clipboard to Windows.
+" Piping yanks through clip.exe stores CRLF on the Windows side, which the
+" bridge syncs back - that is the ^M you get from d-then-p.
 
 " theme
 set background=dark
